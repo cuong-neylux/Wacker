@@ -1,0 +1,389 @@
+*&---------------------------------------------------------------------*
+*& Report ZHR_SST_A1_CONTROL
+*&---------------------------------------------------------------------*
+*&
+*&---------------------------------------------------------------------*
+*&-Version-00001-------------------------------------------------------*
+*& Created on: 18.05.2026
+*& Created by: Quynh Ngo, Cuong Luc (neylux GmbH)
+*&
+*&---------------------------------------------------------------------*
+REPORT zhr_sst_a1_control.
+TABLES: pernr.
+
+INFOTYPES: 0001.
+
+DATA gs_a1_hdr TYPE /nyx/a1_hdr.
+DATA gt_result TYPE TABLE OF zhrsst_a1_1.
+DATA gt_delta TYPE TABLE OF zhrsst_a1_1.
+DATA gt_a1_cstatt TYPE TABLE OF /nyx/a1_cstatt.
+
+* Selection screen
+SELECTION-SCREEN BEGIN OF BLOCK b1 WITH FRAME TITLE TEXT-001.
+PARAMETERS p_begda TYPE begda DEFAULT sy-datum.
+PARAMETERS p_endda TYPE endda DEFAULT sy-datum.
+SELECT-OPTIONS: p_land FOR  gs_a1_hdr-land NO INTERVALS.
+SELECTION-SCREEN END OF BLOCK b1.
+
+SELECTION-SCREEN BEGIN OF BLOCK b2 WITH FRAME TITLE TEXT-002.
+PARAMETERS p_dxa1 AS CHECKBOX DEFAULT abap_true.
+PARAMETERS p_dxav AS CHECKBOX DEFAULT abap_true.
+PARAMETERS p_dxmm AS CHECKBOX DEFAULT abap_true.
+SELECTION-SCREEN END OF BLOCK b2.
+
+
+*---------------------------------------------------------------------*
+INITIALIZATION.
+*---------------------------------------------------------------------*
+  CLEAR: gt_result, gt_delta.
+  SELECT * FROM /nyx/a1_cstatt INTO TABLE gt_a1_cstatt WHERE endda >= sy-datum.
+
+*---------------------------------------------------------------------*
+START-OF-SELECTION.
+*---------------------------------------------------------------------*
+
+GET pernr.
+
+  PERFORM evaluate_a1.
+
+*---------------------------------------------------------------------*
+END-OF-SELECTION.
+*---------------------------------------------------------------------*
+
+  IF gt_delta IS NOT INITIAL.
+    PERFORM update_database.
+  ENDIF.
+
+  IF gt_result IS NOT INITIAL.
+    SORT gt_result BY pernr.
+    PERFORM display_result.
+  ENDIF.
+
+*&---------------------------------------------------------------------*
+*&      Form  EVALUATE_A1
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM evaluate_a1.
+  DATA lt_a1_dest TYPE TABLE OF /nyx/a1_dest.
+  DATA ls_a1_dest TYPE /nyx/a1_dest.
+  DATA lt_p01a1_hist TYPE TABLE OF p01a1_hist.
+  DATA ls_p01a1_hist TYPE p01a1_hist.
+  DATA lt_a1_hdr TYPE TABLE OF /nyx/a1_hdr.
+  DATA ls_a1_hdr TYPE /nyx/a1_hdr.
+  DATA lt_a1_hist TYPE TABLE OF /nyx/a1_hist.
+  DATA lt_a1_hist_tmp TYPE TABLE OF /nyx/a1_hist.
+  DATA ls_a1_hist TYPE  /nyx/a1_hist.
+  DATA ls_a1_hist_tmp TYPE  /nyx/a1_hist.
+  DATA ls_result TYPE zhrsst_a1_1.
+  DATA ls_zhrsst_a1_1 TYPE zhrsst_a1_1.
+  DATA ls_a1_cstatt TYPE /nyx/a1_cstatt.
+
+  SELECT * FROM /nyx/a1_hist INTO TABLE lt_a1_hist WHERE pernr = pernr-pernr
+                            AND begda >= p_begda AND endda <= p_endda.
+  SORT lt_a1_hist BY a1mnr prtnr ASCENDING.
+
+  CLEAR: ls_a1_hist.
+  LOOP AT lt_a1_hist INTO ls_a1_hist.
+    IF ls_a1_hist-a1mnr = ls_a1_hist_tmp-a1mnr.
+      CONTINUE.
+    ENDIF.
+    CLEAR: ls_result, lt_a1_hist_tmp, ls_a1_hist_tmp.
+*   Personnel number
+    ls_result-pernr = pernr-pernr.
+*   A1 number from neylux A1 Manager
+    ls_result-a1mnr = ls_a1_hist-a1mnr.
+*   Traveller fullname
+    ls_result-name = p0001-ename.
+
+    lt_a1_hist_tmp = lt_a1_hist.
+    DELETE lt_a1_hist_tmp WHERE a1mnr <> ls_a1_hist-a1mnr.
+
+*   read from hist when request is submitted (status APPROVED_INT or SAVED_0700)
+    CLEAR: ls_a1_hist_tmp.
+    READ TABLE lt_a1_hist_tmp INTO ls_a1_hist_tmp WITH KEY status = 'APPROVED_INT'.
+    IF sy-subrc <> 0.
+      READ TABLE lt_a1_hist_tmp INTO ls_a1_hist_tmp WITH KEY status = 'SAVED_0700'.
+    ENDIF.
+    ls_result-request_date = ls_a1_hist_tmp-date_from.
+
+*   read from hist when certificate is issued (status APPROVED_B2A)
+    CLEAR: ls_a1_hist_tmp.
+    READ TABLE lt_a1_hist_tmp INTO ls_a1_hist_tmp WITH KEY status = 'APPROVED_B2A'.
+    IF sy-subrc = 0.
+      ls_result-certificate_date = ls_a1_hist_tmp-date_from.
+    ENDIF.
+
+    SORT lt_a1_hist_tmp BY prtnr DESCENDING.
+    CLEAR: ls_a1_hist_tmp.
+    READ TABLE lt_a1_hist_tmp INTO ls_a1_hist_tmp INDEX 1.
+*    Trip start date
+    ls_result-begda = ls_a1_hist_tmp-begda.
+*    Trip end date
+    ls_result-endda = ls_a1_hist_tmp-endda.
+*    Country
+    ls_result-land = ls_a1_hist_tmp-land.
+
+*   Check if country is selected in selection screen
+    READ TABLE p_land WITH KEY low = ls_result-land.
+    IF sy-subrc <> 0.
+      CONTINUE.
+    ENDIF.
+
+*   Trip address
+    CLEAR: lt_a1_dest, ls_a1_dest.
+    SELECT * FROM /nyx/a1_dest INTO TABLE lt_a1_dest WHERE a1mnr = ls_a1_hist-a1mnr.
+    SORT lt_a1_dest BY bsnr ASCENDING.
+    IF lt_a1_dest IS NOT INITIAL.
+      LOOP AT lt_a1_dest INTO ls_a1_dest.
+        CASE sy-tabix.
+          WHEN 1.
+            ls_result-bs_1 = 'X'.
+          WHEN 2.
+            ls_result-bs_2 = 'X'.
+          WHEN 3.
+            ls_result-bs_3 = 'X'.
+          WHEN OTHERS.
+        ENDCASE.
+        ls_result-t536c_key_bs = ls_a1_dest-t536c_key_bs.
+        ls_result-name_bs = ls_a1_dest-name_bs.
+        ls_result-strasse_bs = ls_a1_dest-strasse_bs.
+        ls_result-hausnr_bs = ls_a1_dest-hausnr_bs.
+        ls_result-plz_bs = ls_a1_dest-plz_bs.
+        ls_result-ort_bs = ls_a1_dest-ort_bs.
+      ENDLOOP.
+    ENDIF.
+
+*    find the a1 in table header
+    CLEAR: lt_a1_hdr, ls_a1_hdr.
+    SELECT SINGLE * FROM /nyx/a1_hdr INTO ls_a1_hdr WHERE a1mnr = ls_a1_hist-a1mnr.
+    IF ls_a1_hist_tmp-status <> 'DELETED'.
+*     A1 Type and filter out not selected A1 type in selection screen
+      ls_result-subty = ls_a1_hdr-subty.
+      IF p_dxa1 IS NOT INITIAL AND ls_result-subty <> 'DXA1'.
+        CONTINUE.
+      ENDIF.
+      IF p_dxav IS NOT INITIAL AND ls_result-subty <> 'DXAV'.
+        CONTINUE.
+      ENDIF.
+      IF p_dxav IS NOT INITIAL AND ls_result-subty <> 'DXMM'.
+        CONTINUE.
+      ENDIF.
+    ELSE.
+*      set trip cancel = true if in table hist status = 'DELETED'
+      ls_result-is_cancel = abap_true.
+    ENDIF.
+*   current status of trip in neylux A1 manager
+    ls_result-a1_nyx_status = ls_a1_hist_tmp-status.
+    CLEAR: ls_a1_cstatt.
+*   a1 status text
+    READ TABLE gt_a1_cstatt INTO ls_a1_cstatt WITH KEY status = ls_result-a1_nyx_status
+        sprsl = sy-langu.
+    IF sy-subrc = 0.
+      ls_result-a1_nyx_stat_txt = ls_a1_cstatt-text_long.
+    ENDIF.
+
+*   who did when the change in neylux A1 manager
+    ls_result-a1_nyx_change_user  = ls_a1_hist_tmp-usrid.
+    ls_result-a1_nyx_change_date  = ls_a1_hist_tmp-date_from.
+    ls_result-a1_nyx_change_time  = ls_a1_hist_tmp-time_to.
+
+*   GUID is the ID saved in hist, when A1 request is already issued
+    IF ls_a1_hist_tmp-guid_cnect IS NOT INITIAL.
+      ls_result-b2a_guid  = ls_a1_hist_tmp-guid_cnect.
+      CLEAR: lt_p01a1_hist, ls_p01a1_hist.
+      SELECT * FROM p01a1_hist INTO TABLE lt_p01a1_hist WHERE guid = ls_result-b2a_guid.
+      SORT lt_p01a1_hist BY lfdnr DESCENDING.
+      READ TABLE lt_p01a1_hist INTO ls_p01a1_hist INDEX 1.
+*      get status in SAP B2A
+      ls_result-b2a_status = ls_p01a1_hist-status.
+*     get status text of SAP B2A
+      IF sy-langu = 'DE'.
+        CASE ls_result-b2a_stat_txt.
+          WHEN '00'.
+            ls_result-b2a_stat_txt = 'neu'.
+          WHEN '01'.
+            ls_result-b2a_stat_txt = 'übertragen'.
+          WHEN '03'.
+            ls_result-b2a_stat_txt = 'zu übertragen'.
+          WHEN '07'.
+            ls_result-b2a_stat_txt = 'beantwortet'.
+          WHEN '10'.
+            ls_result-b2a_stat_txt =  'abgelehnt'.
+            ls_result-is_reject = abap_true.
+          WHEN '12'.
+            ls_result-b2a_stat_txt =  'fehlerhaft'.
+          WHEN '13'.
+            ls_result-b2a_stat_txt = 'manuell übertragen'.
+          WHEN '20'.
+            ls_result-b2a_stat_txt = 'empfangen'.
+          WHEN '21'.
+            ls_result-b2a_stat_txt = 'abzulehnen'.
+          WHEN '22'.
+            ls_result-b2a_stat_txt = 'zu verarbeiten'.
+          WHEN '23'.
+            ls_result-b2a_stat_txt = 'verarbeitet'.
+          WHEN '32'.
+            ls_result-b2a_stat_txt = 'zu prüfen'.
+          WHEN '33'.
+            ls_result-b2a_stat_txt = 'manuell verarbeitet'.
+          WHEN '34'.
+            ls_result-b2a_stat_txt = 'nicht zugeordnet'.
+          WHEN '60'.
+            ls_result-b2a_stat_txt = 'geprüft'.
+          WHEN '61'.
+            ls_result-b2a_stat_txt = 'quittiert'.
+          WHEN '62'.
+            ls_result-b2a_stat_txt = 'angenommen'.
+          WHEN '80'.
+            ls_result-b2a_stat_txt = 'geprüft'.
+          WHEN OTHERS.
+        ENDCASE.
+      ELSE.
+        CASE ls_result-b2a_stat_txt.
+          WHEN '00'.
+            ls_result-b2a_stat_txt = 'New'.
+          WHEN '01'.
+            ls_result-b2a_stat_txt = 'Transferred'.
+          WHEN '03'.
+            ls_result-b2a_stat_txt = 'To Be Transferred'.
+          WHEN '07'.
+            ls_result-b2a_stat_txt = 'Answered'.
+          WHEN '10'.
+            ls_result-b2a_stat_txt = 'Rejected'.
+            ls_result-is_reject = abap_true.
+          WHEN '12'.
+            ls_result-b2a_stat_txt = 'With Errors'.
+          WHEN '13'.
+            ls_result-b2a_stat_txt = 'Transferred Manually'.
+          WHEN '20'.
+            ls_result-b2a_stat_txt = 'Received'.
+          WHEN '21'.
+            ls_result-b2a_stat_txt = 'To Be Rejected'.
+          WHEN '22'.
+            ls_result-b2a_stat_txt = 'For Processing'.
+          WHEN '23'.
+            ls_result-b2a_stat_txt = 'Processed'.
+          WHEN '32'.
+            ls_result-b2a_stat_txt = 'To Be Checked'.
+          WHEN '33'.
+            ls_result-b2a_stat_txt = 'Processed Manually'.
+          WHEN '34'.
+            ls_result-b2a_stat_txt = 'Not Assigned'.
+          WHEN '60'.
+            ls_result-b2a_stat_txt = 'Checked'.
+          WHEN '61'.
+            ls_result-b2a_stat_txt = 'Confirmed'.
+          WHEN '62'.
+            ls_result-b2a_stat_txt = 'Accepted'.
+          WHEN '80'.
+            ls_result-b2a_stat_txt = 'Checked'.
+          WHEN OTHERS.
+        ENDCASE.
+      ENDIF.
+
+*     who did when the change in SAP B2A component
+      ls_result-b2a_change_report = ls_p01a1_hist-report.
+      ls_result-b2a_change_user = ls_p01a1_hist-euser.
+      ls_result-b2a_change_date = ls_p01a1_hist-datum.
+      ls_result-b2a_change_time = ls_p01a1_hist-uzeit.
+*     All error relevant info in neylux A1 / B2A is saved here
+      ls_result-msgty = ls_p01a1_hist-msgty.
+      ls_result-msgid = ls_p01a1_hist-msgid.
+      ls_result-msgno = ls_p01a1_hist-msgno.
+      ls_result-msgv1 = ls_p01a1_hist-msgv1.
+      ls_result-msgv2 = ls_p01a1_hist-msgv2.
+      ls_result-msgv3 = ls_p01a1_hist-msgv3.
+      ls_result-msgv4 = ls_p01a1_hist-msgv4.
+      ls_result-text = ls_p01a1_hist-text.
+
+      APPEND ls_result TO gt_result.
+
+      CLEAR: ls_zhrsst_a1_1.
+      SELECT SINGLE * FROM zhrsst_a1_1 INTO ls_zhrsst_a1_1 WHERE pernr = pernr-pernr
+        AND a1mnr = ls_result-a1mnr.
+
+*     Check with current data in table, if there is difference we will update database table zhrsst_a1_1
+      IF ls_result <> ls_zhrsst_a1_1.
+        APPEND ls_result TO gt_delta.
+      ENDIF.
+    ENDIF.
+  ENDLOOP.
+
+ENDFORM.  "evaluate_a1
+*&---------------------------------------------------------------------*
+*&      Form  DISPLAY_RESULT
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM display_result .
+  DATA ls_variant TYPE disvariant.
+  DATA ls_layout TYPE slis_layout_alv.
+
+  ls_variant-report = sy-repid.
+
+  DATA lt_fieldcat TYPE slis_t_fieldcat_alv.
+  FIELD-SYMBOLS <ls_field> TYPE slis_fieldcat_alv.
+
+  CALL FUNCTION 'REUSE_ALV_FIELDCATALOG_MERGE'
+    EXPORTING
+      i_internal_tabname     = 'GT_RESULT'
+      i_structure_name       = 'ZHRSST_A1_1_S'
+    CHANGING
+      ct_fieldcat            = lt_fieldcat
+    EXCEPTIONS
+      inconsistent_interface = 1
+      program_error          = 2
+      OTHERS                 = 3.
+  IF sy-subrc <> 0.
+* Implement suitable error handling here
+  ENDIF.
+
+  LOOP AT lt_fieldcat ASSIGNING <ls_field>.
+    CASE <ls_field>-fieldname.
+      WHEN 'PERNR' OR 'A1MNR'.
+        <ls_field>-key = abap_true.
+      WHEN OTHERS.
+    ENDCASE.
+  ENDLOOP.
+
+  CALL FUNCTION 'REUSE_ALV_GRID_DISPLAY'
+    EXPORTING
+      i_callback_program      = sy-cprog
+      i_callback_user_command = 'CALLBACK_ALV'
+      i_structure_name        = 'ZHRSST_A1_1_S'
+      is_layout               = ls_layout
+      it_fieldcat             = lt_fieldcat
+      i_save                  = 'A'
+      is_variant              = ls_variant
+* IMPORTING
+*     E_EXIT_CAUSED_BY_CALLER =
+*     ES_EXIT_CAUSED_BY_USER  =
+    TABLES
+      t_outtab                = gt_result
+    EXCEPTIONS
+      program_error           = 1
+      OTHERS                  = 2.
+  IF sy-subrc <> 0.
+* Implement suitable error handling here
+  ENDIF.
+
+ENDFORM.  "display_result
+*&---------------------------------------------------------------------*
+*&      Form  UPDATE_DATABASE
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM update_database .
+  MODIFY zhrsst_a1_1 FROM TABLE gt_delta.
+  COMMIT WORK AND WAIT.
+ENDFORM. "update_database
