@@ -1,5 +1,5 @@
 *&---------------------------------------------------------------------*
-*& Report ZHR_SST_A1_CHECK_1
+*& Report ZHR_SST_A1_CHECK_2
 *&-Version-00001-------------------------------------------------------*
 *& Created on: 05.2026
 *& Created by: G.S. neylux GmbH
@@ -12,16 +12,14 @@ REPORT zhr_sst_a1_check_2.
 
 *Data declaration
 TYPES: BEGIN OF ty_display_data,
-         pernr         TYPE pernr_d,
-         name          TYPE emnam,
-         a1mnr         TYPE /nyx/a1_mnr,
-         subty         TYPE subty,
-         endda         TYPE endda,
-         begda         TYPE begda,
-         land          TYPE land1,
-         a1_nyx_status TYPE /nyx/a1_status,
-         b2a_guid      TYPE p01_svguid,
-         b2a_status    TYPE hrpayde_b2a_sv_status_package,
+         pernr      TYPE pernr_d,
+         name       TYPE emnam,
+         a1mnr      TYPE /nyx/a1_mnr,
+         subty      TYPE subty,
+         endda      TYPE endda,
+         begda      TYPE begda,
+         land       TYPE land1,
+         guid_cnect TYPE p01_svguid,
        END OF ty_display_data.
 DATA ls_display_data TYPE ty_display_data.
 DATA lt_display_data TYPE TABLE OF ty_display_data.
@@ -32,31 +30,29 @@ DATA lv_success TYPE char1.
 DATA lt_a1_hdr TYPE TABLE OF /nyx/a1_hdr.
 DATA ls_a1_hdr TYPE /nyx/a1_hdr.
 DATA lt_p01a1_stat TYPE TABLE OF p01a1_stat.
+DATA lt_key_value_param TYPE /nyx/a1_key_value_param_tt.
 DATA ls_p01a1_stat TYPE p01a1_stat.
 DATA ls_variant TYPE disvariant.
-DATA ls_layout TYPE slis_layout_alv.
-DATA lt_fieldcat TYPE slis_t_fieldcat_alv.
-FIELD-SYMBOLS <ls_field> TYPE slis_fieldcat_alv.
 
 *Selection screen
 SELECTION-SCREEN BEGIN OF BLOCK b1 WITH FRAME TITLE TEXT-001.
-PARAMETERS p_begda TYPE begda.
-PARAMETERS p_endda TYPE endda.
+  PARAMETERS p_begda TYPE begda.
+  PARAMETERS p_endda TYPE endda.
 SELECTION-SCREEN END OF BLOCK b1.
 SELECTION-SCREEN BEGIN OF BLOCK b2 WITH FRAME TITLE TEXT-002.
-PARAMETERS p_pernr TYPE pernr_d OBLIGATORY.
+  PARAMETERS p_pernr TYPE pernr_d OBLIGATORY.
 SELECTION-SCREEN END OF BLOCK b2.
 SELECTION-SCREEN BEGIN OF BLOCK b3 WITH FRAME TITLE TEXT-003.
-PARAMETERS p_dxa1 AS CHECKBOX DEFAULT ''.
-PARAMETERS p_dxav AS CHECKBOX DEFAULT ''.
-PARAMETERS p_dxmm AS CHECKBOX DEFAULT ''.
+  PARAMETERS p_dxa1 AS CHECKBOX DEFAULT ''.
+  PARAMETERS p_dxav AS CHECKBOX DEFAULT ''.
+  PARAMETERS p_dxmm AS CHECKBOX DEFAULT ''.
 SELECTION-SCREEN END OF BLOCK b3.
 SELECTION-SCREEN BEGIN OF BLOCK b4 WITH FRAME TITLE TEXT-004.
-PARAMETERS p_user LIKE suid_st_bname-bname OBLIGATORY.
-PARAMETERS p_mail TYPE comm_id_long OBLIGATORY.
+  PARAMETERS p_user LIKE suid_st_bname-bname.
+  PARAMETERS p_mail TYPE comm_id_long.
 SELECTION-SCREEN END OF BLOCK b4.
 SELECTION-SCREEN BEGIN OF BLOCK b5 WITH FRAME TITLE TEXT-005.
-PARAMETERS p_test AS CHECKBOX DEFAULT 'X'.
+  PARAMETERS p_test AS CHECKBOX DEFAULT 'X'.
 SELECTION-SCREEN END OF BLOCK b5.
 
 *--------------------------------------------------------------------*
@@ -71,8 +67,10 @@ INITIALIZATION.
 START-OF-SELECTION.
 *--------------------------------------------------------------------*
   PERFORM check_data.
-  IF p_test IS NOT INITIAL.
+  IF ls_display_data IS NOT INITIAL.
     PERFORM send_mail.
+  ENDIF.
+  IF p_test IS NOT INITIAL.
     PERFORM display_data.
   ENDIF.
 *--------------------------------------------------------------------*
@@ -101,7 +99,7 @@ FORM check_data.
       IF ls_p01a1_stat-mdtyp = '2'
         AND ls_p01a1_stat-status = '23'.
       ELSE.
-        ls_display_data = CORRESPONDING #( ls_a1_hdr ).
+        ls_display_data = CORRESPONDING #( BASE ( ls_display_data )  ls_a1_hdr ).
         APPEND ls_display_data TO lt_display_data.
       ENDIF.
       CLEAR: ls_p01a1_stat, ls_display_data.
@@ -125,15 +123,15 @@ FORM check_data.
       ENDSELECT.
       IF ls_a1_hdr-status = 'APPROVED_B2A'.
       ELSE.
-        ls_display_data = CORRESPONDING #( ls_a1_hdr ).
+        ls_display_data = CORRESPONDING #( BASE ( ls_display_data )  ls_p01a1_stat ).
         APPEND ls_display_data TO lt_display_data.
       ENDIF.
       CLEAR: ls_display_data, ls_a1_hdr.
     ENDLOOP.
     CLEAR: lt_p01a1_stat, ls_p01a1_stat.
-
+  ENDIF.
 *DXAV tickbox is clicked
-  ELSEIF p_dxav IS NOT INITIAL.
+  IF p_dxav IS NOT INITIAL.
     SELECT * FROM /nyx/a1_hdr INTO TABLE lt_a1_hdr
       WHERE pernr = p_pernr
       AND begda >= p_begda
@@ -150,7 +148,7 @@ FORM check_data.
       IF ls_p01a1_stat-mdtyp = '2'
         AND ls_p01a1_stat-status = '23'.
       ELSE.
-        ls_display_data = CORRESPONDING #( ls_a1_hdr ).
+        ls_display_data = CORRESPONDING #( BASE ( ls_display_data )  ls_a1_hdr ).
         APPEND ls_display_data TO lt_display_data.
       ENDIF.
       CLEAR: ls_p01a1_stat, ls_display_data.
@@ -174,15 +172,15 @@ FORM check_data.
       ENDSELECT.
       IF ls_a1_hdr-status = 'APPROVED_B2A'.
       ELSE.
-        ls_display_data = CORRESPONDING #( ls_a1_hdr ).
+        ls_display_data = CORRESPONDING #( BASE ( ls_display_data )  ls_p01a1_stat ).
         APPEND ls_display_data TO lt_display_data.
       ENDIF.
       CLEAR: ls_display_data, ls_a1_hdr.
     ENDLOOP.
     CLEAR: lt_p01a1_stat, ls_p01a1_stat.
-
+  ENDIF.
 *DXMM tickbox is clicked
-  ELSEIF p_dxmm IS NOT INITIAL.
+  IF p_dxmm IS NOT INITIAL.
     SELECT * FROM /nyx/a1_hdr INTO TABLE lt_a1_hdr
       WHERE pernr = p_pernr
       AND begda >= p_begda
@@ -199,7 +197,7 @@ FORM check_data.
       IF ls_p01a1_stat-mdtyp = '2'
         AND ls_p01a1_stat-status = '23'.
       ELSE.
-        ls_display_data = CORRESPONDING #( ls_a1_hdr ).
+        ls_display_data = CORRESPONDING #( BASE ( ls_display_data )  ls_a1_hdr ).
         APPEND ls_display_data TO lt_display_data.
       ENDIF.
       CLEAR: ls_p01a1_stat, ls_display_data.
@@ -223,7 +221,7 @@ FORM check_data.
       ENDSELECT.
       IF ls_a1_hdr-status = 'APPROVED_B2A'.
       ELSE.
-        ls_display_data = CORRESPONDING #( ls_a1_hdr ).
+        ls_display_data = CORRESPONDING #( BASE ( ls_display_data )  ls_p01a1_stat ).
         APPEND ls_display_data TO lt_display_data.
       ENDIF.
       CLEAR: ls_display_data, ls_a1_hdr.
@@ -237,41 +235,46 @@ ENDFORM.
 *&      Form  SEND_MAIL
 *&---------------------------------------------------------------------*
 FORM send_mail.
+  IF p_mail IS NOT INITIAL.
+    /nyx/cl_a1_util=>send_mail(
+      EXPORTING
+        iv_mailtype = '061'
+        is_message = ls_message
+        iv_sender_uid       = p_user
+        iv_recipient_mail   = p_mail
+        iv_send_immediately = 'X'             "
+        it_key_value_param       = lt_key_value_param
+      RECEIVING
+        ev_success          = lv_success
+    ).
+    IF lv_success IS INITIAL.
+      MESSAGE e135(/nyx/a1).
+    ENDIF.
+  ELSE.
+    WRITE:/'Please give a valid Sender and email address'.
+  ENDIF.
 ENDFORM.
 *&---------------------------------------------------------------------*
 *&      Form  DISPLAY_DATA
 *&---------------------------------------------------------------------*
 FORM display_data.
-  ls_variant-report = sy-repid.
-
-  CALL FUNCTION 'REUSE_ALV_FIELDCATALOG_MERGE'
+*Display output
+  CALL FUNCTION 'DISPLAY_BASIC_LIST'
     EXPORTING
-      i_internal_tabname     = 'lt_display_data'
-      i_structure_name       = 'ls_display_data'
-    CHANGING
-      ct_fieldcat            = lt_fieldcat
-    EXCEPTIONS  "#EC CI_SUBRC
-      inconsistent_interface = 1  "#EC CI_SUBRC
-      program_error          = 2  "#EC CI_SUBRC
-      OTHERS                 = 3. "#EC CI_SUBRC
-  IF sy-subrc <> 0.
-* Implement suitable error handling here
-  ENDIF.
-
-  CALL FUNCTION 'REUSE_ALV_GRID_DISPLAY'
-    EXPORTING
-      i_callback_program      = sy-cprog
-      i_callback_user_command = 'CALLBACK_ALV'
-      i_structure_name        = 'ls_display_data'
-      is_layout               = ls_layout
-      it_fieldcat             = lt_fieldcat
-      i_save                  = 'A'
-      is_variant              = ls_variant
+      basic_list_title    = 'Display errors'
+      file_name           = ''
+      head_line1          = ''
+      data_structure      = 'ZHRSST_A1_2_S'
+    IMPORTING
+      return_code         = lv_retcd
     TABLES
-      t_outtab                = lt_display_data
+      data_tab            = lt_display_data
     EXCEPTIONS
-      program_error           = 1
-      OTHERS                  = 2.
+      download_problem    = 1
+      no_data_tab_entries = 2
+      table_mismatch      = 3
+      print_problems      = 4
+      OTHERS              = 5.
   IF sy-subrc <> 0.
 * Implement suitable error handling here
   ENDIF.
