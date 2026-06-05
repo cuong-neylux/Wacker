@@ -8,26 +8,27 @@ REPORT zhr_sst_a1_check_1.
 
 *Tables
 TABLES zhrsst_a1_1.
-*Constants
 
 *Data declaration
-DATA gt_dispdata TYPE TABLE OF zhrsst_a1_1_s.
+DATA gt_result TYPE STANDARD TABLE OF zhrsst_a1_1.
+DATA gt_result_out TYPE STANDARD TABLE OF zhrsst_a1_1.
+DATA gt_result_in TYPE TABLE OF zhrsst_a1_1.
+DATA gt_result_com TYPE TABLE OF zhrsst_a1_1.
 DATA gv_date TYPE dats.
-DATA gt_reminder TYPE TABLE OF zhrsst_a1_1.
 DATA gt_zhrsst_a1_1 TYPE TABLE OF zhrsst_a1_1.
-DATA ls_zhrsst_a1_1 TYPE zhrsst_a1_1.
-DATA lt_p01a1_hist TYPE TABLE OF p01a1_hist.
-DATA ls__p01a1_hist TYPE p01a1_hist.
-DATA lt_pc01b2a_sv_p_hi TYPE TABLE OF pc01b2a_sv_p_hi.
-DATA ls_pc01b2a_sv_p_hi TYPE pc01b2a_sv_p_hi.
-DATA lv_retcd TYPE sy-subrc.
-DATA zhrsst_a1_2.
-DATA lt_key_value_param TYPE /nyx/a1_key_value_param_tt.
+DATA gt_p01a1_hist TYPE TABLE OF p01a1_hist.
+DATA gt_p01a1_stat TYPE TABLE OF p01a1_stat.
 DATA ls_message TYPE bapiret2.
 DATA lv_success TYPE char1.
+DATA gt_pc01b2a_sv_p_hi TYPE STANDARD TABLE OF pc01b2a_sv_p_hi.
+DATA gt_result_mail TYPE TABLE OF zhrsst_a1_1.
+DATA gt_a1_hdr TYPE TABLE OF /nyx/a1_hdr.
+DATA gt_a1_hist TYPE TABLE OF /nyx/a1_hist.
+DATA gv_rem_date TYPE sy-datum.
 *Selection screen
 SELECTION-SCREEN BEGIN OF BLOCK b1 WITH FRAME TITLE TEXT-001.
-SELECT-OPTIONS s_dates FOR gv_date.
+PARAMETERS p_begda TYPE begda DEFAULT sy-datum OBLIGATORY.
+PARAMETERS p_endda TYPE endda DEFAULT sy-datum OBLIGATORY.
 SELECTION-SCREEN END OF BLOCK b1.
 SELECTION-SCREEN BEGIN OF BLOCK b2 WITH FRAME TITLE TEXT-002.
 PARAMETERS p_out AS CHECKBOX DEFAULT ''.
@@ -35,56 +36,70 @@ PARAMETERS p_com AS CHECKBOX DEFAULT ''.
 PARAMETERS p_in AS CHECKBOX DEFAULT ''.
 SELECTION-SCREEN END OF BLOCK b2.
 SELECTION-SCREEN BEGIN OF BLOCK b3 WITH FRAME TITLE TEXT-003.
-PARAMETERS p_error AS CHECKBOX DEFAULT ''.
+PARAMETERS p_error AS CHECKBOX DEFAULT 'X'.
 PARAMETERS p_warn AS CHECKBOX DEFAULT ''.
 SELECTION-SCREEN END OF BLOCK b3.
 SELECTION-SCREEN BEGIN OF BLOCK b4 WITH FRAME TITLE TEXT-004.
-PARAMETERS p_user LIKE suid_st_bname-bname OBLIGATORY.
-PARAMETERS p_mail TYPE comm_id_long OBLIGATORY.
+PARAMETERS p_user LIKE suid_st_bname-bname DEFAULT 'BATCH'.
+PARAMETERS p_mail TYPE comm_id_long.
 PARAMETERS p_days TYPE int2 DEFAULT '7'.
 SELECTION-SCREEN END OF BLOCK b4.
 SELECTION-SCREEN BEGIN OF BLOCK b5 WITH FRAME TITLE TEXT-005.
 PARAMETERS p_test AS CHECKBOX DEFAULT 'X'.
 SELECTION-SCREEN END OF BLOCK b5.
 
-
-
 *--------------------------------------------------------------------*
 INITIALIZATION.
 *--------------------------------------------------------------------*
-  AUTHORITY-CHECK OBJECT 'S_TCODE'                  "#EC CI_A086_0001
-           ID 'TCD' FIELD 'ZHR_SST_A1_CHECK_1'.
-  IF sy-subrc NE 0 AND sy-sysid NE 'WE5'.
-    MESSAGE e059(eu) WITH 'ZHR_SST_A1_CHECK_1'.  " no authority
-  ENDIF.
+  CLEAR: gt_result_out, gt_result_in, gt_result_com, gt_p01a1_stat, gt_p01a1_hist.
 
-  SELECT * FROM zhrsst_a1_1
-      INTO TABLE gt_zhrsst_a1_1
-      WHERE msgty NE ''.
+*  AUTHORITY-CHECK OBJECT 'S_TCODE'                  "#EC CI_A086_0001
+*           ID 'TCD' FIELD 'ZHR_SST_A1_CHECK_1'.
+*  IF sy-subrc NE 0 AND sy-sysid NE 'WE5'.
+*    MESSAGE e059(eu) WITH 'ZHR_SST_A1_CHECK_1'.  " no authority
+*  ENDIF.
+
+
 *--------------------------------------------------------------------*
 START-OF-SELECTION.
 *--------------------------------------------------------------------*
 *&---------------------------------------------------------------------*
+  CONDENSE p_user NO-GAPS.
+  CONDENSE p_mail NO-GAPS.
+  gv_rem_date = sy-datum - p_days.
+
+  PERFORM get_data.
+
 *Evaluation process selection
   IF p_out EQ 'X'.
     PERFORM check_data_out.
   ENDIF.
   IF p_com EQ 'X'.
-    PERFORM check_data_hi.
+    PERFORM check_data_com.
   ENDIF.
   IF p_in EQ 'X'.
     PERFORM check_data_in.
   ENDIF.
-*Send mail if the reminder is filled.
 
-  IF p_days IS NOT INITIAL.
-    PERFORM send_mail.
-    PERFORM update_db.
+  IF p_test IS INITIAL.
+    IF p_mail IS NOT INITIAL.
+      PERFORM send_mail USING '0'.
+    ENDIF.
+    IF p_mail IS INITIAL AND gt_result_out IS NOT INITIAL.
+      PERFORM send_mail USING '0'.
+    ENDIF.
+    IF p_days <> '0' OR p_days <> ''.
+      PERFORM send_mail USING p_days.
+    ENDIF.
   ENDIF.
-  PERFORM display_data.
 *--------------------------------------------------------------------*
 END-OF-SELECTION.
 *--------------------------------------------------------------------*
+  APPEND LINES OF gt_result_out TO gt_result.
+  APPEND LINES OF gt_result_com TO gt_result.
+  APPEND LINES OF gt_result_in TO gt_result.
+
+  PERFORM display_data.
 
 *&---------------------------------------------------------------------*
 *&      Form  CHECK_DATA_OUT
@@ -92,64 +107,98 @@ END-OF-SELECTION.
 * Evaluation 1: Outbound process
 *&---------------------------------------------------------------------*
 FORM check_data_out.
-  IF p_error IS NOT INITIAL.
-    SELECT * FROM p01a1_hist
-      INTO TABLE lt_p01a1_hist
-      WHERE ( msgty = 'E'
-      AND report = 'RPCA1VD0_OUT' )
-      OR ( msgty = 'E'
-      AND report = 'RPCA1HD0_OUT' ).
+  DATA lt_p01a1_hist_out TYPE STANDARD TABLE OF p01a1_hist.
+  DATA ls_zhrsst_a1_1 TYPE zhrsst_a1_1.
+  DATA ls_p01a1_hist TYPE p01a1_hist.
+  DATA ls_p01a1_stat TYPE p01a1_stat.
+
+  lt_p01a1_hist_out = gt_p01a1_hist.
+  DELETE lt_p01a1_hist_out WHERE report <> 'RPCA1VD0_OUT' AND report <> 'RPCA1HD0_OUT'.
+
+  IF p_error IS INITIAL.
+    DELETE lt_p01a1_hist_out WHERE msgty = 'E'.
   ENDIF.
-  MOVE-CORRESPONDING lt_p01a1_hist TO gt_dispdata.
-  IF p_warn IS NOT INITIAL.
-    SELECT * FROM p01a1_hist
-  INTO TABLE lt_p01a1_hist
-     WHERE  ( msgty = 'W'
-  AND report = 'RPCA1VD0_OUT' )
-       OR   ( msgty = 'W'
-  AND report = 'RPCA1HD0_OUT' ).
+  IF p_warn IS INITIAL.
+    DELETE lt_p01a1_hist_out WHERE msgty = 'W'.
   ENDIF.
-*  MOVE-CORRESPONDING lt_p01a1_hist TO gt_dispdata.
-  CLEAR lt_p01a1_hist.
+
+  CLEAR: ls_p01a1_hist.
+  LOOP AT lt_p01a1_hist_out INTO ls_p01a1_hist.
+    CLEAR: ls_p01a1_stat, ls_zhrsst_a1_1.
+    READ TABLE gt_p01a1_stat INTO ls_p01a1_stat WITH KEY guid = ls_p01a1_hist-guid.
+    READ TABLE gt_zhrsst_a1_1 INTO ls_zhrsst_a1_1 WITH KEY pernr = ls_p01a1_stat-pernr
+                                                           land = ls_p01a1_stat-land
+                                                           begda = ls_p01a1_stat-mzbeg
+                                                           endda = ls_p01a1_stat-mzend.
+
+    IF sy-subrc = 0.
+      APPEND ls_zhrsst_a1_1 TO gt_result_out.
+    ELSE.
+      PERFORM submit_control_report.
+      CLEAR: ls_zhrsst_a1_1 .
+      READ TABLE gt_zhrsst_a1_1 INTO ls_zhrsst_a1_1 WITH KEY pernr = ls_p01a1_stat-pernr
+                                                           land = ls_p01a1_stat-land
+                                                           begda = ls_p01a1_stat-mzbeg
+                                                           endda = ls_p01a1_stat-mzend.
+
+      IF sy-subrc = 0.
+        APPEND ls_zhrsst_a1_1 TO gt_result_out.
+      ENDIF.
+    ENDIF.
+  ENDLOOP.
 ENDFORM.
 *&---------------------------------------------------------------------*
-*&      Form  CHECK_DATA_HI
+*&      Form  check_data_com
 *&---------------------------------------------------------------------*
 *Evaluation 2: Communication to HI
 *&---------------------------------------------------------------------*
-FORM check_data_hi.
-  IF p_error IS NOT INITIAL.
-    SELECT * FROM p01a1_hist
-      INTO TABLE lt_p01a1_hist
-      WHERE msgty = 'E'
-      AND report = 'H99_B2AMANAGER' .
-*  MOVE-CORRESPONDING lt_p01a1_hist TO gt_dispdata.
+FORM check_data_com.
+  DATA lt_p01a1_hist_com TYPE STANDARD TABLE OF p01a1_hist.
+  DATA lt_pc01b2a_sv_p_hi TYPE STANDARD TABLE OF pc01b2a_sv_p_hi.
+  DATA ls_zhrsst_a1_1 TYPE zhrsst_a1_1.
+  DATA ls_p01a1_hist TYPE p01a1_hist.
+  DATA ls_p01a1_stat TYPE p01a1_stat.
 
-    SELECT * FROM pc01b2a_sv_p_hi
-         INTO TABLE lt_pc01b2a_sv_p_hi
-         WHERE ( msgty = 'E'
-         AND report = 'RP_PAYDE_B2A_SV_UNPACK' )
-        OR ( msgty = 'E'
-         AND report = 'RP_PAYDE_B2A_SV_COLLECTOR' ).
-    MOVE-CORRESPONDING lt_pc01b2a_sv_p_hi TO gt_dispdata.
-  ENDIF.
-  IF p_warn IS NOT INITIAL.
-    SELECT * FROM p01a1_hist
-        INTO TABLE lt_p01a1_hist
-      WHERE  msgty = 'W'
-      AND report = 'H99_B2AMANAGER' .
-*    MOVE-CORRESPONDING lt_p01a1_hist TO gt_dispdata.
-    CLEAR lt_p01a1_hist.
+  lt_p01a1_hist_com = gt_p01a1_hist.
+  lt_pc01b2a_sv_p_hi = gt_pc01b2a_sv_p_hi.
+  DELETE lt_p01a1_hist_com WHERE report <> 'H99_B2AMANAGER' AND report <> 'RP_PAYDE_B2A_SV_UNPACK'
+                                  AND report <> 'RP_PAYDE_B2A_SV_COLLECTOR'.
 
-    SELECT * FROM pc01b2a_sv_p_hi
-       INTO TABLE lt_pc01b2a_sv_p_hi
-       WHERE ( msgty = 'W'
-       AND report = 'RP_PAYDE_B2A_SV_UNPACK' )
-       OR   ( msgty = 'W'
-       AND report = 'RP_PAYDE_B2A_SV_COLLECTOR' ).
-*      MOVE-CORRESPONDING lt_pc01b2a_sv_p_hi TO gt_dispdata.
-    CLEAR lt_pc01b2a_sv_p_hi.
+  IF p_error IS INITIAL.
+    DELETE lt_p01a1_hist_com WHERE msgty = 'E'.
+    DELETE lt_pc01b2a_sv_p_hi WHERE msgty = 'E'.
   ENDIF.
+  IF p_warn IS INITIAL.
+    DELETE lt_p01a1_hist_com WHERE msgty = 'W'.
+    DELETE lt_pc01b2a_sv_p_hi WHERE msgty = 'W'.
+  ENDIF.
+
+  CLEAR: ls_p01a1_hist.
+  LOOP AT lt_p01a1_hist_com INTO ls_p01a1_hist.
+    CLEAR: ls_p01a1_stat, ls_zhrsst_a1_1.
+    READ TABLE gt_p01a1_stat INTO ls_p01a1_stat WITH KEY guid = ls_p01a1_hist-guid.
+    READ TABLE gt_zhrsst_a1_1 INTO ls_zhrsst_a1_1 WITH KEY pernr = ls_p01a1_stat-pernr
+                                                           land = ls_p01a1_stat-land
+                                                           begda = ls_p01a1_stat-mzbeg
+                                                           endda = ls_p01a1_stat-mzend.
+
+    IF sy-subrc = 0.
+      APPEND ls_zhrsst_a1_1 TO gt_result_com.
+    ELSE.
+      PERFORM submit_control_report.
+      CLEAR: ls_zhrsst_a1_1.
+      READ TABLE gt_zhrsst_a1_1 INTO ls_zhrsst_a1_1 WITH KEY pernr = ls_p01a1_stat-pernr
+                                                           land = ls_p01a1_stat-land
+                                                           begda = ls_p01a1_stat-mzbeg
+                                                           endda = ls_p01a1_stat-mzend.
+
+      IF sy-subrc = 0.
+        APPEND ls_zhrsst_a1_1 TO gt_result_com.
+      ENDIF.
+
+    ENDIF.
+  ENDLOOP.
+
 ENDFORM.
 *&---------------------------------------------------------------------*
 *&      Form  CHECK_DATA_IN
@@ -157,71 +206,330 @@ ENDFORM.
 *Evaluation 3: Inbound Process
 *&---------------------------------------------------------------------*
 FORM check_data_in.
-  SELECT * FROM p01a1_hist
-    INTO TABLE lt_p01a1_hist
-    WHERE ( msgty = 'E'
-    AND report = 'RPCA1HD0_IN' )
-    OR   ( msgty = 'W'
-    AND report = 'RPCA1HD0_IN' )
-    OR ( msgty = 'E'
-    AND report = 'RPCA1VD0_IN' )
-    OR   ( msgty = 'W'
-    AND report = 'RPCA1VD0_IN' ).
-  MOVE-CORRESPONDING lt_p01a1_hist TO gt_dispdata.
-  CLEAR lt_p01a1_hist.
+  DATA lt_p01a1_hist_in TYPE STANDARD TABLE OF p01a1_hist.
+  DATA ls_zhrsst_a1_1 TYPE zhrsst_a1_1.
+  DATA ls_p01a1_hist TYPE p01a1_hist.
+  DATA ls_p01a1_stat TYPE p01a1_stat.
+
+  lt_p01a1_hist_in = gt_p01a1_hist.
+
+  DELETE lt_p01a1_hist_in WHERE report <> 'RPCA1HD0_IN' AND report <> 'RPCA1VD0_IN'.
+
+  IF p_error IS INITIAL.
+    DELETE lt_p01a1_hist_in WHERE msgty = 'E'.
+  ENDIF.
+  IF p_warn IS INITIAL.
+    DELETE lt_p01a1_hist_in WHERE msgty = 'W'.
+  ENDIF.
+
+  CLEAR: ls_p01a1_hist.
+  LOOP AT lt_p01a1_hist_in INTO ls_p01a1_hist.
+    CLEAR: ls_p01a1_stat, ls_zhrsst_a1_1.
+    READ TABLE gt_p01a1_stat INTO ls_p01a1_stat WITH KEY guid = ls_p01a1_hist-guid.
+    READ TABLE gt_zhrsst_a1_1 INTO ls_zhrsst_a1_1 WITH KEY pernr = ls_p01a1_stat-pernr
+                                                           land = ls_p01a1_stat-land
+                                                           begda = ls_p01a1_stat-mzbeg
+                                                           endda = ls_p01a1_stat-mzend.
+
+    IF sy-subrc = 0.
+      APPEND ls_zhrsst_a1_1 TO gt_result_in.
+    ELSE.
+      PERFORM submit_control_report.
+      READ TABLE gt_zhrsst_a1_1 INTO ls_zhrsst_a1_1 WITH KEY pernr = ls_p01a1_stat-pernr
+                                                           land = ls_p01a1_stat-land
+                                                           begda = ls_p01a1_stat-mzbeg
+                                                           endda = ls_p01a1_stat-mzend.
+
+      IF sy-subrc = 0.
+        APPEND ls_zhrsst_a1_1 TO gt_result_in.
+      ENDIF.
+    ENDIF.
+  ENDLOOP.
 ENDFORM.
 
 *&---------------------------------------------------------------------*
 *&      Form  SEND_MAIL
 *&---------------------------------------------------------------------*
-FORM send_mail.
-  IF p_out IS NOT INITIAL.
-    /nyx/cl_a1_util=>send_mail(
-      EXPORTING
-        iv_mailtype = '061'
-        is_message = ls_message
-        iv_sender_uid       = p_user
-        iv_recipient_mail   = p_mail
-        iv_send_immediately = 'X'             "
-        it_key_value_param       = lt_key_value_param
-      RECEIVING
-        ev_success          = lv_success
-    ).
-    IF lv_success IS INITIAL.
-      MESSAGE e135(/nyx/a1).
+FORM send_mail USING iv_day.
+  FIELD-SYMBOLS <fs_result> TYPE zhrsst_a1_1.
+  DATA ls_result TYPE zhrsst_a1_1.
+  DATA ls_zhrsst_a1_1 TYPE zhrsst_a1_1.
+  DATA ls_kv TYPE /nyx/a1_key_val_param_s.
+  DATA lt_key_value_param TYPE /nyx/a1_key_value_param_tt.
+  DATA lt_p0105 TYPE TABLE OF p0105.
+  DATA ls_p0105 TYPE p0105.
+  DATA lv_mail TYPE comm_id_long.
+
+  IF iv_day = '0'.      "email
+    IF p_out IS NOT INITIAL.
+      IF gt_result_out IS NOT INITIAL.
+        CLEAR: ls_result, gt_result_mail.
+        LOOP AT gt_result_out INTO ls_result.
+          CLEAR: ls_zhrsst_a1_1.
+          READ TABLE gt_zhrsst_a1_1 WITH KEY b2a_guid = ls_result-b2a_guid INTO ls_zhrsst_a1_1.
+          IF sy-subrc = 0.
+            IF ls_zhrsst_a1_1-email_informed = 'X'.
+              CONTINUE.
+            ENDIF.
+            APPEND ls_result TO gt_result_mail.
+          ENDIF.
+
+          CLEAR: lv_mail.
+          IF p_mail IS NOT INITIAL.
+            lv_mail = p_mail.
+          ELSE.
+*         get traveller email
+            CLEAR: lt_p0105, ls_p0105.
+            CALL FUNCTION 'HR_READ_INFOTYPE_AUTHC_DISABLE'.
+            CALL FUNCTION 'HR_READ_INFOTYPE'
+              EXPORTING
+                pernr           = ls_zhrsst_a1_1-pernr
+                infty           = '0105'
+                begda           = sy-datum
+                endda           = sy-datum
+              TABLES
+                infty_tab       = lt_p0105
+              EXCEPTIONS
+                infty_not_found = 1
+                invalid_input   = 2
+                OTHERS          = 3.
+            IF sy-subrc <> 0.
+*       Implement suitable error handling here
+            ENDIF.
+            IF lt_p0105 IS NOT INITIAL.
+              READ TABLE lt_p0105 INTO ls_p0105 WITH KEY subty = '0010'.
+              IF ls_p0105 IS NOT INITIAL.
+                lv_mail = ls_p0105-usrid_long.
+              ENDIF.
+            ENDIF.
+          ENDIF.
+*         prepare data
+          PERFORM prepare_data  USING ls_result CHANGING lt_key_value_param.
+
+          IF gt_result_mail IS NOT INITIAL.
+            /nyx/cl_a1_util=>send_mail(
+              EXPORTING
+                iv_mailtype = '061'
+                is_message = ls_message
+                iv_sender_uid       = p_user
+                iv_recipient_mail   = lv_mail
+                iv_send_immediately = 'X'             "
+                it_key_value_param  = lt_key_value_param
+              RECEIVING
+                ev_success          = lv_success
+            ).
+            IF lv_success IS INITIAL.
+              MESSAGE e135(/nyx/a1).
+            ELSE.
+              PERFORM update_db USING 'M'.
+            ENDIF.
+          ENDIF.
+        ENDLOOP.
+      ENDIF.
     ENDIF.
-  ENDIF.
-  IF p_com IS NOT INITIAL.
-    /nyx/cl_a1_util=>send_mail(
-      EXPORTING
-        iv_mailtype = '089'
-        is_message = ls_message
-        iv_sender_uid       = p_user
-        iv_recipient_mail   = p_mail
-        iv_send_immediately = 'X'             "
-        it_key_value_param       = lt_key_value_param
-      RECEIVING
-        ev_success          = lv_success
-    ).
-    IF lv_success IS INITIAL.
-      MESSAGE e135(/nyx/a1).
+
+    IF p_com IS NOT INITIAL.
+      IF gt_result_com IS NOT INITIAL.
+        CLEAR: ls_result, gt_result_mail.
+        LOOP AT gt_result_com INTO ls_result.
+          CLEAR: ls_zhrsst_a1_1.
+          READ TABLE gt_zhrsst_a1_1 WITH KEY b2a_guid = ls_result-b2a_guid INTO ls_zhrsst_a1_1.
+          IF sy-subrc = 0.
+            IF ls_zhrsst_a1_1-email_informed = 'X'.
+              CONTINUE.
+            ENDIF.
+            APPEND ls_result TO gt_result_mail.
+          ENDIF.
+*         prepare data
+          PERFORM prepare_data  USING ls_result CHANGING lt_key_value_param.
+
+          /nyx/cl_a1_util=>send_mail(
+            EXPORTING
+              iv_mailtype = '063'
+              is_message = ls_message
+              iv_sender_uid       = p_user
+              iv_recipient_mail   = p_mail
+              iv_send_immediately = 'X'             "
+              it_key_value_param       = lt_key_value_param
+            RECEIVING
+              ev_success          = lv_success
+          ).
+          IF lv_success IS INITIAL.
+            MESSAGE e135(/nyx/a1).
+          ELSE.
+            PERFORM update_db USING 'M'.
+          ENDIF.
+        ENDLOOP.
+      ENDIF.
     ENDIF.
-  ENDIF.
-  IF p_in IS NOT INITIAL.
-    /nyx/cl_a1_util=>send_mail(
-      EXPORTING
-        iv_mailtype = '063'
-        is_message = ls_message
-        iv_sender_uid       = p_user
-        iv_recipient_mail   = p_mail
-        iv_send_immediately = 'X'             "
-        it_key_value_param       = lt_key_value_param
-      RECEIVING
-        ev_success          = lv_success
-    ).
-    IF lv_success IS INITIAL.
-      MESSAGE e135(/nyx/a1).
+
+    IF p_in IS NOT INITIAL.
+      IF gt_result_in IS NOT INITIAL.
+        CLEAR: ls_result, gt_result_mail.
+        LOOP AT gt_result_in INTO ls_result.
+          IF ls_result-email_informed = 'X'.
+            CONTINUE.
+          ENDIF.
+          APPEND ls_result TO gt_result_mail.
+        ENDLOOP.
+        /nyx/cl_a1_util=>send_mail(
+          EXPORTING
+            iv_mailtype = '065'
+            is_message = ls_message
+            iv_sender_uid       = p_user
+            iv_recipient_mail   = p_mail
+            iv_send_immediately = 'X'             "
+            it_key_value_param       = lt_key_value_param
+          RECEIVING
+            ev_success          = lv_success
+        ).
+        IF lv_success IS INITIAL.
+          MESSAGE e135(/nyx/a1).
+        ELSE.
+          PERFORM update_db USING 'M'.
+        ENDIF.
+      ENDIF.
     ENDIF.
+  ELSE.   "reminder
+    IF p_out IS NOT INITIAL.
+      IF gt_result_out IS NOT INITIAL.
+        CLEAR: ls_result, gt_result_mail.
+        LOOP AT gt_result_out INTO ls_result.
+          IF ls_result-b2a_change_date = gv_rem_date.
+            CLEAR: ls_zhrsst_a1_1.
+            READ TABLE gt_zhrsst_a1_1 WITH KEY b2a_guid = ls_result-b2a_guid INTO ls_zhrsst_a1_1.
+            IF sy-subrc = 0.
+              IF ls_zhrsst_a1_1-email_reminded = 'X'.
+                CONTINUE.
+              ENDIF.
+              APPEND ls_result TO gt_result_mail.
+            ENDIF.
+
+            CLEAR: lv_mail.
+            IF p_mail IS NOT INITIAL.
+              lv_mail = p_mail.
+            ELSE.
+*         get traveller email
+              CLEAR: lt_p0105, ls_p0105.
+              CALL FUNCTION 'HR_READ_INFOTYPE_AUTHC_DISABLE'.
+              CALL FUNCTION 'HR_READ_INFOTYPE'
+                EXPORTING
+                  pernr           = ls_zhrsst_a1_1-pernr
+                  infty           = '0105'
+                  begda           = sy-datum
+                  endda           = sy-datum
+                TABLES
+                  infty_tab       = lt_p0105
+                EXCEPTIONS
+                  infty_not_found = 1
+                  invalid_input   = 2
+                  OTHERS          = 3.
+              IF sy-subrc <> 0.
+*       Implement suitable error handling here
+              ENDIF.
+              IF lt_p0105 IS NOT INITIAL.
+                READ TABLE lt_p0105 INTO ls_p0105 WITH KEY subty = '0010'.
+                IF ls_p0105 IS NOT INITIAL.
+                  lv_mail = ls_p0105-usrid_long.
+                ENDIF.
+              ENDIF.
+            ENDIF.
+*             prepare data
+            PERFORM prepare_data  USING ls_result CHANGING lt_key_value_param.
+
+            IF gt_result_mail IS NOT INITIAL.
+              /nyx/cl_a1_util=>send_mail(
+                EXPORTING
+                  iv_mailtype = '062'
+                  is_message = ls_message
+                  iv_sender_uid       = p_user
+                  iv_recipient_mail   = ls_p0105-usrid_long
+                  iv_send_immediately = 'X'             "
+                  it_key_value_param = lt_key_value_param
+                RECEIVING
+                  ev_success          = lv_success
+              ).
+              IF lv_success IS INITIAL.
+                MESSAGE e135(/nyx/a1).
+              ELSE.
+                PERFORM update_db USING 'R'.
+              ENDIF.
+            ENDIF.
+          ENDIF.
+        ENDLOOP.
+      ENDIF.
+    ENDIF.
+
+    IF p_com IS NOT INITIAL.
+      IF gt_result_com IS NOT INITIAL.
+        CLEAR: ls_result, gt_result_mail.
+        LOOP AT gt_result_com INTO ls_result.
+          CLEAR: ls_zhrsst_a1_1.
+          READ TABLE gt_zhrsst_a1_1 WITH KEY b2a_guid = ls_result-b2a_guid INTO ls_zhrsst_a1_1.
+          IF sy-subrc = 0.
+            IF ls_zhrsst_a1_1-email_reminded = 'X'.
+              CONTINUE.
+            ENDIF.
+            APPEND ls_result TO gt_result_mail.
+          ENDIF.
+*         prepare data
+          PERFORM prepare_data  USING ls_result CHANGING lt_key_value_param.
+
+          /nyx/cl_a1_util=>send_mail(
+            EXPORTING
+              iv_mailtype = '067'
+              is_message = ls_message
+              iv_sender_uid       = p_user
+              iv_recipient_mail   = p_mail
+              iv_send_immediately = 'X'             "
+              it_key_value_param       = lt_key_value_param
+            RECEIVING
+              ev_success          = lv_success
+          ).
+          IF lv_success IS INITIAL.
+            MESSAGE e135(/nyx/a1).
+          ELSE.
+            PERFORM update_db USING 'R'.
+          ENDIF.
+        ENDLOOP.
+      ENDIF.
+    ENDIF.
+
+    IF p_in IS NOT INITIAL.
+      IF gt_result_in IS NOT INITIAL.
+        CLEAR: ls_result, gt_result_mail.
+        LOOP AT gt_result_in INTO ls_result.
+          CLEAR: ls_zhrsst_a1_1.
+          READ TABLE gt_zhrsst_a1_1 WITH KEY b2a_guid = ls_result-b2a_guid INTO ls_zhrsst_a1_1.
+          IF sy-subrc = 0.
+            IF ls_zhrsst_a1_1-email_reminded = 'X'.
+              CONTINUE.
+            ENDIF.
+            APPEND ls_result TO gt_result_mail.
+          ENDIF.
+*         prepare data
+          PERFORM prepare_data  USING ls_result CHANGING lt_key_value_param.
+
+          /nyx/cl_a1_util=>send_mail(
+            EXPORTING
+              iv_mailtype = '068'
+              is_message = ls_message
+              iv_sender_uid       = p_user
+              iv_recipient_mail   = p_mail
+              iv_send_immediately = 'X'             "
+              it_key_value_param       = lt_key_value_param
+            RECEIVING
+              ev_success          = lv_success
+          ).
+          IF lv_success IS INITIAL.
+            MESSAGE e135(/nyx/a1).
+          ELSE.
+            PERFORM update_db USING 'R'.
+          ENDIF.
+        ENDLOOP.
+      ENDIF.
+    ENDIF.
+
   ENDIF.
 ENDFORM.
 
@@ -229,35 +537,177 @@ ENDFORM.
 *&      Form  DISPLAY_DATA
 *&---------------------------------------------------------------------*
 FORM display_data.
-  IF p_test IS NOT INITIAL.
+  DATA lv_retcd TYPE sy-subrc.
 *Display output
-    CALL FUNCTION 'DISPLAY_BASIC_LIST'
-      EXPORTING
-        basic_list_title    = 'Display errors'
-        file_name           = ' '
-        head_line1          = ' '
-        data_structure      = 'ZHRSST_A1_1_S'
-      IMPORTING
-        return_code         = lv_retcd
-      TABLES
-        data_tab            = gt_dispdata
-      EXCEPTIONS
-        download_problem    = 1
-        no_data_tab_entries = 2
-        table_mismatch      = 3
-        print_problems      = 4
-        OTHERS              = 5.
-    IF sy-subrc <> 0.
+  CALL FUNCTION 'DISPLAY_BASIC_LIST'
+    EXPORTING
+      basic_list_title    = 'Display errors'
+      file_name           = ' '
+      head_line1          = ' '
+      data_structure      = 'ZHRSST_A1_1_S'
+    IMPORTING
+      return_code         = lv_retcd
+    TABLES
+      data_tab            = gt_result
+    EXCEPTIONS
+      download_problem    = 1
+      no_data_tab_entries = 2
+      table_mismatch      = 3
+      print_problems      = 4
+      OTHERS              = 5.
+  IF sy-subrc <> 0.
 * Implement suitable error handling here
-    ENDIF.
-
   ENDIF.
+
 ENDFORM.
 
 *&---------------------------------------------------------------------*
 *&      Form  UPDATE_DB
 *&---------------------------------------------------------------------*
-FORM update_db.
-  MODIFY zhrsst_a1_1 FROM TABLE gt_reminder.
+FORM update_db USING iv_mail.
+  FIELD-SYMBOLS: <fs_result> TYPE zhrsst_a1_1.
+  LOOP AT gt_result_mail ASSIGNING <fs_result>.
+    IF iv_mail = 'M'. "mail
+      <fs_result>-email_informed = 'X'.
+    ELSE. "reminder
+      <fs_result>-email_reminded = 'X'.
+    ENDIF.
+  ENDLOOP.
+
+  MODIFY zhrsst_a1_1 FROM TABLE gt_result_mail.
   COMMIT WORK AND WAIT.
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  GET_DATA
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM get_data.
+  DATA ls_p01a1_stat TYPE p01a1_stat.
+  DATA lt_p01a1_hist TYPE TABLE OF p01a1_hist.
+  DATA ls_p01a1_hist TYPE p01a1_hist.
+
+  SELECT * FROM p01a1_stat INTO TABLE gt_p01a1_stat WHERE mzbeg >= p_begda AND mzend <= p_endda.
+  SORT  gt_p01a1_stat BY guid ASCENDING.
+
+  CLEAR: lt_p01a1_hist.
+  IF p_warn IS INITIAL.
+    SELECT * FROM p01a1_hist INTO TABLE lt_p01a1_hist WHERE msgty = 'E'.
+  ELSE.
+    SELECT * FROM p01a1_hist INTO TABLE lt_p01a1_hist WHERE msgty = 'E' OR msgty = 'W'.
+  ENDIF.
+  SORT lt_p01a1_hist BY guid ASCENDING.
+
+  LOOP AT gt_p01a1_stat INTO ls_p01a1_stat.
+    CLEAR: ls_p01a1_hist.
+    READ TABLE lt_p01a1_hist INTO ls_p01a1_hist WITH KEY guid = ls_p01a1_stat-guid.
+    IF sy-subrc = 0.
+      APPEND ls_p01a1_hist TO gt_p01a1_hist.
+    ENDIF.
+  ENDLOOP.
+
+* New B2A process
+  IF p_warn IS INITIAL.
+    SELECT * FROM pc01b2a_sv_p_hi
+         INTO TABLE gt_pc01b2a_sv_p_hi
+         WHERE ( msgty = 'E'
+         AND report = 'RP_PAYDE_B2A_SV_UNPACK' )
+        OR ( msgty = 'E'
+         AND report = 'RP_PAYDE_B2A_SV_COLLECTOR' ).
+  ELSE.
+    SELECT * FROM pc01b2a_sv_p_hi
+         INTO TABLE gt_pc01b2a_sv_p_hi
+         WHERE ( msgty = 'E' OR  msgty = 'W' )
+         AND ( report = 'RP_PAYDE_B2A_SV_UNPACK'
+         OR  report = 'RP_PAYDE_B2A_SV_COLLECTOR' ).
+  ENDIF.
+
+  SELECT * FROM zhrsst_a1_1 INTO TABLE gt_zhrsst_a1_1 WHERE begda >= p_begda AND endda <= p_endda.
+
+  SELECT * FROM /nyx/a1_hdr INTO TABLE gt_a1_hdr WHERE begda >= p_begda AND endda <= p_endda.
+
+  SELECT * FROM /nyx/a1_hist INTO TABLE gt_a1_hist WHERE begda >= p_begda AND endda <= p_endda.
+ENDFORM.  "get_data
+*&---------------------------------------------------------------------*
+*&      Form  SUBMIT_CONTROL_REPORT
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM submit_control_report .
+  DATA: lv_jobname  TYPE btcjob VALUE 'ZHR_SST_A1_CONTROL',
+        lv_jobcount TYPE btcjobcnt.
+
+  CALL FUNCTION 'JOB_OPEN'
+    EXPORTING
+      jobname  = lv_jobname
+    IMPORTING
+      jobcount = lv_jobcount.
+
+  SUBMIT zhr_sst_a1_control
+    WITH p_begda = p_begda
+    WITH p_endda  = p_endda
+    VIA JOB lv_jobname NUMBER lv_jobcount
+    AND RETURN.
+
+  CALL FUNCTION 'JOB_CLOSE'
+    EXPORTING
+      jobname   = lv_jobname
+      jobcount  = lv_jobcount
+      strtimmed = 'X'.
+
+  WAIT UP TO 10 SECONDS.
+
+  REFRESH: gt_zhrsst_a1_1.
+  SELECT * FROM zhrsst_a1_1 INTO TABLE gt_zhrsst_a1_1 WHERE begda >= p_begda AND endda <= p_endda.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  PREPARE_DATA
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*      <--P_LT_KEY_VALUE_PARAM  text
+*----------------------------------------------------------------------*
+FORM prepare_data USING is_result TYPE zhrsst_a1_1
+                  CHANGING it_key_value_param TYPE /nyx/a1_key_value_param_tt.
+  DATA ls_kv TYPE /nyx/a1_key_val_param_s.
+  CLEAR: it_key_value_param.
+
+  CLEAR: ls_kv.
+  ls_kv-skey = '@PER@'.
+  ls_kv-svalue = is_result-pernr.
+  APPEND ls_kv TO it_key_value_param.
+
+  CLEAR: ls_kv.
+  ls_kv-skey = '@LD@'.
+  ls_kv-svalue = is_result-land.
+  APPEND ls_kv TO it_key_value_param.
+
+  CLEAR: ls_kv.
+  ls_kv-skey = '@BD@'.
+  ls_kv-svalue = is_result-begda.
+  APPEND ls_kv TO it_key_value_param.
+
+  CLEAR: ls_kv.
+  ls_kv-skey = '@ED@'.
+  ls_kv-svalue = is_result-endda.
+  APPEND ls_kv TO it_key_value_param.
+
+  CLEAR: ls_kv.
+  ls_kv-skey = '@MESSAGE@'.
+  ls_kv-svalue = is_result-text.
+  APPEND ls_kv TO it_key_value_param.
+
+  CLEAR: ls_kv.
+  ls_kv-skey = '@A1MNR@'.
+  ls_kv-svalue = is_result-a1mnr.
+  APPEND ls_kv TO it_key_value_param.
+
+
 ENDFORM.
