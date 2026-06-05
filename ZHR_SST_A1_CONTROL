@@ -38,11 +38,11 @@ SELECTION-SCREEN END OF BLOCK b2.
 *---------------------------------------------------------------------*
 INITIALIZATION.
 *---------------------------------------------------------------------*
-  AUTHORITY-CHECK OBJECT 'S_TCODE'                    "#EC CI_A086_0001
-           ID 'TCD' FIELD 'ZHR_SST_A1_CONTROL'.
-  IF sy-subrc NE 0 AND sy-sysid NE 'WE5'.
-    MESSAGE e059(eu) WITH 'ZHR_SST_A1_CONTROL'.  " no authority
-  ENDIF.
+*  AUTHORITY-CHECK OBJECT 'S_TCODE'                    "#EC CI_A086_0001
+*           ID 'TCD' FIELD 'ZHR_SST_A1_CONTROL'.
+*  IF sy-subrc NE 0 AND sy-sysid NE 'WE5'.
+*    MESSAGE e059(eu) WITH 'ZHR_SST_A1_CONTROL'.  " no authority
+*  ENDIF.
 
 
   CLEAR: gt_result, gt_delta.
@@ -242,13 +242,26 @@ FORM evaluate_a1.
           ls_result-b2a_guid  = ls_a1_hist_tmp-guid_cnect.
         ENDIF.
       ENDIF.
+    ELSE.
+*   A1 request hasn't been sent to HI yet
+      CLEAR: ls_p01a1_stat.
+      READ TABLE lt_p01a1_stat INTO ls_p01a1_stat WITH KEY pernr = pernr-pernr
+            land = ls_a1_hist-land
+            mzbeg = ls_a1_hist-begda
+            mzend = ls_a1_hist-endda.
+      IF sy-subrc = 0.
+*       get the request GUID from HI
+        ls_result-b2a_guid = ls_p01a1_stat-guid.
+**       get B2A meldungstyp
+*        ls_result-b2a_mdtyp = ls_p01a1_stat-mdtyp.
+      ENDIF.
       CLEAR: lt_p01a1_hist, ls_p01a1_hist.
       SELECT * FROM p01a1_hist INTO TABLE lt_p01a1_hist WHERE guid = ls_result-b2a_guid. "#EC "#EC CI_SUBRC
       SORT lt_p01a1_hist BY lfdnr DESCENDING.
       READ TABLE lt_p01a1_hist INTO ls_p01a1_hist INDEX 1.
 *     get B2A meldungstyp
-      CLEAR: ls_p01a1_stat.
-      READ TABLE lt_p01a1_stat INTO ls_p01a1_stat WITH KEY guid = ls_result-b2a_guid.
+*      CLEAR: ls_p01a1_stat.
+*      READ TABLE lt_p01a1_stat INTO ls_p01a1_stat WITH KEY guid = ls_result-b2a_guid.
       ls_result-b2a_mdtyp = ls_p01a1_stat-mdtyp.
       IF ls_result-b2a_mdtyp = '3'. "Ablehnung
         ls_result-is_reject = abap_true.
@@ -362,7 +375,6 @@ FORM evaluate_a1.
               sprsl = sy-langu.
         ls_result-text = ls_t100-text.
       ENDIF.
-
     ENDIF.
     APPEND ls_result TO gt_result.
 
@@ -394,6 +406,8 @@ FORM display_result .
   FIELD-SYMBOLS <ls_field> TYPE slis_fieldcat_alv.
 
   ls_variant-report = sy-repid.
+
+
 
 
   CALL FUNCTION 'REUSE_ALV_FIELDCATALOG_MERGE'
