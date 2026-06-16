@@ -33,8 +33,8 @@ SELECT-OPTIONS: s_natio  FOR gs_selection-natio NO INTERVALS. "PA0002
 SELECT-OPTIONS: s_req_nr FOR gs_selection-trip_request_nr NO INTERVALS.   "Request ID
 SELECT-OPTIONS: s_land  FOR gs_selection-zland NO INTERVALS.
 
-PARAMETERS: p_begda TYPE begda.
-PARAMETERS: p_endda  TYPE endda.
+PARAMETERS: p_begda TYPE begda DEFAULT sy-datum.
+PARAMETERS: p_endda  TYPE endda DEFAULT sy-datum.
 SELECT-OPTIONS: s_twstat  FOR gs_selection-tw_status NO INTERVALS. "scco02
 SELECTION-SCREEN END OF BLOCK a1.
 
@@ -48,7 +48,7 @@ PARAMETERS p_seprat TYPE char1 DEFAULT ','.
 SELECTION-SCREEN END OF BLOCK a2.
 
 SELECTION-SCREEN BEGIN OF BLOCK a3 WITH FRAME TITLE TEXT-003.
-PARAMETERS p_test AS CHECKBOX .
+PARAMETERS p_test AS CHECKBOX DEFAULT 'X'.
 SELECTION-SCREEN END OF BLOCK a3.
 
 AT SELECTION-SCREEN OUTPUT .
@@ -227,25 +227,32 @@ FORM process_data .
   DATA: lv_uname TYPE uname.
   DATA: ls_dest_list TYPE /nyx/sccoreq21v4.
   DATA: ls_log TYPE zhrsst_a1_2.
+  DATA: ls_pa0001 TYPE pa0001.
 
   CLEAR: gt_aus_d.
   LOOP AT gt_a1_hdr INTO ls_a1_hdr.
     CLEAR ls_aus_d.
 
     ls_aus_d-pernr = ls_a1_hdr-pernr.
-    IF ls_a1_hdr-customer01 IS NOT INITIAL.
-      SELECT SINGLE * FROM /nyx/sccoreq21v4 INTO ls_dest_list WHERE proc_value = ls_a1_hdr-a1mnr.
-      IF sy-subrc <> 0.
-        CONTINUE.
-      ENDIF.
 
-      SELECT SINGLE * FROM /nyx/sccoreq02v4 INTO ls_tr_header WHERE doc_id = ls_dest_list-doc_id. "#EC CI_ALL_FIELDS_NEEDED
-      IF sy-subrc <> 0.
-        CONTINUE.
-      ENDIF.
-
-      CONCATENATE ls_tr_header-requestid ls_dest_list-segmentlegid INTO ls_aus_d-trip_id.
+    SELECT SINGLE * FROM /nyx/sccoreq21v4 INTO ls_dest_list WHERE proc_value = ls_a1_hdr-a1mnr.
+    IF sy-subrc <> 0.
+      CONTINUE.
     ENDIF.
+
+    SELECT SINGLE * FROM /nyx/sccoreq02v4 INTO ls_tr_header WHERE doc_id = ls_dest_list-doc_id. "#EC CI_ALL_FIELDS_NEEDED
+    IF sy-subrc <> 0.
+      CONTINUE.
+    ENDIF.
+
+    CONCATENATE ls_tr_header-requestid ls_dest_list-segmentlegid INTO ls_aus_d-trip_id.
+
+    SELECT SINGLE * FROM pa0001 INTO ls_pa0001 WHERE pernr = ls_a1_hdr-pernr AND begda <= sy-datum AND endda >= sy-datum.
+    IF sy-subrc <> 0.
+      CONTINUE.
+    ENDIF.
+
+    ls_aus_d-fdf_kostl_pernr = ls_pa0001-kostl.
 
 * Find the approver for traveller
     SELECT SINGLE * FROM fpb_persparm INTO ls_persparm "#EC CI_ALL_FIELDS_NEEDED
@@ -279,6 +286,11 @@ FORM process_data .
       ls_aus_d-times = ls_a1_hist-time_from.
     ENDIF.
 
+    MOVE-CORRESPONDING EXACT ls_aus_d TO ls_log.
+    ls_log-a1mnr = ls_a1_hdr-a1mnr.
+    ls_log-vp_date = ls_a1_hist-date_from.
+    ls_log-vp_time = ls_a1_hist-time_from.
+
 * Read destinations
     SELECT * FROM /nyx/a1_dest INTO TABLE lt_a1_dest WHERE pernr = ls_a1_hdr-pernr AND a1mnr = ls_a1_hdr-a1mnr.
     IF sy-subrc = 0.
@@ -292,21 +304,21 @@ FORM process_data .
           WHEN 3.
             CONCATENATE ls_aus_d-trip_id '3RD' INTO ls_aus_d-trip_id.
           WHEN 4.
-            CONCATENATE ls_aus_d-trip_id '4RD' INTO ls_aus_d-trip_id.
+            CONCATENATE ls_aus_d-trip_id '4TH' INTO ls_aus_d-trip_id.
           WHEN 5.
-            CONCATENATE ls_aus_d-trip_id '5RD' INTO ls_aus_d-trip_id.
+            CONCATENATE ls_aus_d-trip_id '5TH' INTO ls_aus_d-trip_id.
           WHEN 6.
-            CONCATENATE ls_aus_d-trip_id '6RD' INTO ls_aus_d-trip_id.
+            CONCATENATE ls_aus_d-trip_id '6TH' INTO ls_aus_d-trip_id.
           WHEN 7.
-            CONCATENATE ls_aus_d-trip_id '7RD' INTO ls_aus_d-trip_id.
+            CONCATENATE ls_aus_d-trip_id '7TH' INTO ls_aus_d-trip_id.
           WHEN 8.
-            CONCATENATE ls_aus_d-trip_id '8RD' INTO ls_aus_d-trip_id.
+            CONCATENATE ls_aus_d-trip_id '8TH' INTO ls_aus_d-trip_id.
           WHEN 9.
-            CONCATENATE ls_aus_d-trip_id '9RD' INTO ls_aus_d-trip_id.
+            CONCATENATE ls_aus_d-trip_id '9TH' INTO ls_aus_d-trip_id.
           WHEN 10.
-            CONCATENATE ls_aus_d-trip_id '10RD' INTO ls_aus_d-trip_id.
+            CONCATENATE ls_aus_d-trip_id '10TH' INTO ls_aus_d-trip_id.
           WHEN 11.
-            CONCATENATE ls_aus_d-trip_id '11RD' INTO ls_aus_d-trip_id.
+            CONCATENATE ls_aus_d-trip_id '11TH' INTO ls_aus_d-trip_id.
           WHEN OTHERS.
         ENDCASE.
         ls_aus_d-ankey = ls_a1_dest-t536c_key_bs.
@@ -329,8 +341,8 @@ FORM process_data .
           ls_aus_d-tw_status = 'CANCEL'.
           MOVE-CORRESPONDING EXACT ls_aus_d TO ls_log.
           ls_log-a1mnr = ls_a1_hdr-a1mnr.
-          ls_log-vp_date = ls_a1_hist_delete-vp_date.
-          ls_log-vp_time = ls_a1_hist_delete-vp_time.
+          ls_log-vp_date = ls_a1_hist_delete-date_from.
+          ls_log-vp_time = ls_a1_hist_delete-time_from.
           ls_log-vp_action = 'DELETE'.
 
           APPEND ls_log TO gt_log.
@@ -343,10 +355,6 @@ FORM process_data .
         IF sy-subrc <> 0.
 
           ls_aus_d-tw_status = 'CREATE'.
-          MOVE-CORRESPONDING EXACT ls_aus_d TO ls_log.
-          ls_log-a1mnr = ls_a1_hdr-a1mnr.
-          ls_log-vp_date = ls_a1_hist-vp_date.
-          ls_log-vp_time = ls_a1_hist-vp_time.
           ls_log-vp_action = 'CREATE'.
 
           APPEND ls_log TO gt_log.
@@ -359,10 +367,6 @@ FORM process_data .
             OR ls_log-hausn NE ls_aus_d-hausn OR ls_log-plz NE ls_aus_d-plz OR ls_log-ort NE ls_aus_d-ort.
 
             ls_aus_d-tw_status = 'APPROVED'.
-            MOVE-CORRESPONDING EXACT ls_aus_d TO ls_log.
-            ls_log-a1mnr = ls_a1_hdr-a1mnr.
-            ls_log-vp_date = ls_a1_hist-vp_date.
-            ls_log-vp_time = ls_a1_hist-vp_time.
             ls_log-vp_action = 'CHANGE'.
 
             APPEND ls_log TO gt_log.
@@ -376,61 +380,51 @@ FORM process_data .
 
       CONTINUE.           " Go to the next a1 header
     ELSE.
+* No destinations available
       CONCATENATE ls_aus_d-trip_id '1ST' INTO ls_aus_d-trip_id.
-    ENDIF.
 
 * If the entry exists with the status DELETE => remove
-    SELECT SINGLE * FROM zhrsst_a1_2 INTO ls_log WHERE trip_id = ls_aus_d-trip_id AND a1mnr = ls_a1_hdr-a1mnr AND vp_action = 'DELETE'.
-    IF sy-subrc = 0.
-      CONTINUE.
-    ENDIF.
+      SELECT SINGLE * FROM zhrsst_a1_2 INTO ls_log WHERE trip_id = ls_aus_d-trip_id AND a1mnr = ls_a1_hdr-a1mnr AND vp_action = 'DELETE'.
+      IF sy-subrc = 0.
+        CONTINUE.
+      ENDIF.
 
 
 * If there was a entry in /nyx/a1_hist with the status DELETED
-    SELECT SINGLE * FROM /nyx/a1_hist INTO ls_a1_hist_delete WHERE pernr = ls_aus_d-pernr AND a1mnr = ls_a1_hdr-a1mnr AND status = 'DELETED'.
-    IF sy-subrc = 0.
-      ls_aus_d-tw_status = 'CANCEL'.
-      MOVE-CORRESPONDING EXACT ls_aus_d TO ls_log.
-      ls_log-a1mnr = ls_a1_hdr-a1mnr.
-      ls_log-vp_date = ls_a1_hist_delete-vp_date.
-      ls_log-vp_time = ls_a1_hist_delete-vp_time.
-      ls_log-vp_action = 'DELETE'.
-
-      APPEND ls_log TO gt_log.
-      APPEND ls_aus_d TO gt_aus_d.
-    ENDIF.
-
-* If no entry exists at all => create
-    SELECT SINGLE * FROM zhrsst_a1_2 INTO ls_log WHERE trip_id = ls_aus_d-trip_id AND a1mnr = ls_a1_hdr-a1mnr AND tw_status = 'CREATE'.
-    IF sy-subrc <> 0.
-      ls_aus_d-tw_status = 'CREATE'.
-      MOVE-CORRESPONDING EXACT ls_aus_d TO ls_log.
-      ls_log-a1mnr = ls_a1_hdr-a1mnr.
-      ls_log-vp_date = ls_a1_hist-vp_date.
-      ls_log-vp_time = ls_a1_hist-vp_time.
-      ls_log-vp_action = 'CREATE'.
-
-      APPEND ls_log TO gt_log.
-      APPEND ls_aus_d TO gt_aus_d.
-    ELSE.
-* Compare with entries
-      IF ls_log-zland NE ls_aus_d-zland OR ls_log-datv1 NE ls_aus_d-datv1 OR ls_log-datb1 NE ls_aus_d-datb1
-        OR ls_log-ankey NE ls_aus_d-ankey OR ls_log-name NE ls_aus_d-name OR ls_log-stras NE ls_aus_d-stras
-        OR ls_log-hausn NE ls_aus_d-hausn OR ls_log-plz NE ls_aus_d-plz OR ls_log-ort NE ls_aus_d-ort.
-
-        ls_aus_d-tw_status = 'APPROVED'.
-        MOVE-CORRESPONDING EXACT ls_aus_d TO ls_log.
-        ls_log-a1mnr = ls_a1_hdr-a1mnr.
-        ls_log-vp_date = ls_a1_hist-vp_date.
-        ls_log-vp_time = ls_a1_hist-vp_time.
-        ls_log-vp_action = 'CHANGE'.
+      SELECT SINGLE * FROM /nyx/a1_hist INTO ls_a1_hist_delete WHERE pernr = ls_aus_d-pernr AND a1mnr = ls_a1_hdr-a1mnr AND status = 'DELETED'.
+      IF sy-subrc = 0.
+        ls_aus_d-tw_status = 'CANCEL'.
+        ls_log-vp_action = 'DELETE'.
 
         APPEND ls_log TO gt_log.
         APPEND ls_aus_d TO gt_aus_d.
+        CONTINUE.
+      ENDIF.
+
+* If no entry exists at all => create
+      SELECT SINGLE * FROM zhrsst_a1_2 INTO ls_log WHERE trip_id = ls_aus_d-trip_id AND a1mnr = ls_a1_hdr-a1mnr AND tw_status = 'CREATE'.
+      IF sy-subrc <> 0.
+        ls_aus_d-tw_status = 'CREATE'.
+        ls_log-vp_action = 'CREATE'.
+
+        APPEND ls_log TO gt_log.
+        APPEND ls_aus_d TO gt_aus_d.
+        CONTINUE.
+      ELSE.
+* Compare with entries
+        IF ls_log-zland NE ls_aus_d-zland OR ls_log-datv1 NE ls_aus_d-datv1 OR ls_log-datb1 NE ls_aus_d-datb1
+          OR ls_log-ankey NE ls_aus_d-ankey OR ls_log-name NE ls_aus_d-name OR ls_log-stras NE ls_aus_d-stras
+          OR ls_log-hausn NE ls_aus_d-hausn OR ls_log-plz NE ls_aus_d-plz OR ls_log-ort NE ls_aus_d-ort.
+
+          ls_aus_d-tw_status = 'APPROVED'.
+          ls_log-vp_action = 'CHANGE'.
+
+          APPEND ls_log TO gt_log.
+          APPEND ls_aus_d TO gt_aus_d.
+          CONTINUE.
+        ENDIF.
       ENDIF.
     ENDIF.
-
-    APPEND ls_aus_d TO gt_aus_d.
   ENDLOOP.
 
 ENDFORM.
@@ -443,6 +437,7 @@ FORM generate_csv .
   DATA: ls_aus_d TYPE zhr_sst_concur_reisen_output_s.
   DATA: ls_aus_final TYPE zhr_sst_concur_reisen_output_1.
   DATA: ls_csv_row TYPE LINE OF truxs_t_text_data.
+  FIELD-SYMBOLS: <fs_csv_row>.
 
   CLEAR: gt_aus_final.
   LOOP AT gt_aus_d INTO ls_aus_d.
@@ -450,7 +445,6 @@ FORM generate_csv .
     CONCATENATE '"' ls_aus_d-trip_id '"' INTO ls_aus_final-trip_id.
     CONCATENATE '"' ls_aus_d-pernr '"' INTO ls_aus_final-pernr.
     CONCATENATE '"' ls_aus_d-pernr_rba '"' INTO ls_aus_final-pernr_rba.
-    CONCATENATE '"' ls_aus_d-tw_status '"' INTO ls_aus_final-tw_status.
     CONCATENATE '"' ls_aus_d-zland '"' INTO ls_aus_final-zland.
     CONCATENATE '"' ls_aus_d-datv1 '"' INTO ls_aus_final-datv1.
     CONCATENATE '"' ls_aus_d-datb1 '"' INTO ls_aus_final-datb1.
@@ -462,25 +456,28 @@ FORM generate_csv .
     CONCATENATE '"' ls_aus_d-hausn '"' INTO ls_aus_final-hausn.
     CONCATENATE '"' ls_aus_d-plz '"' INTO ls_aus_final-plz.
     CONCATENATE '"' ls_aus_d-ort '"' INTO ls_aus_final-ort.
+    CONCATENATE '"' ls_aus_d-tw_status '"' INTO ls_aus_final-tw_status.
+    CONCATENATE '"' ls_aus_d-fdf_kostl_pernr '"' INTO ls_aus_final-fdf_kostl_pernr.
+    CONCATENATE '"' ls_aus_d-fdf_aufnr_trip '"' INTO ls_aus_final-fdf_aufnr_trip.
 
     APPEND ls_aus_final TO gt_aus_final.
   ENDLOOP.
 
-  CALL FUNCTION 'SAP_CONVERT_TO_CSV_FORMAT'
+  CALL FUNCTION 'SAP_CONVERT_TO_TEX_FORMAT'
     EXPORTING
-      i_field_seperator    = p_seprat
+      I_FIELD_SEPERATOR    = p_seprat
     TABLES
-      i_tab_sap_data       = gt_aus_final   "type standard table
+      I_TAB_SAP_DATA       = gt_aus_final
     CHANGING
-      i_tab_converted_data = gt_csv_table
+      I_TAB_CONVERTED_DATA = gt_csv_table
     EXCEPTIONS
-      conversion_failed    = 1
-      OTHERS               = 2.
+      CONVERSION_FAILED    = 4.
 
   IF sy-subrc <> 0.
     MESSAGE ID 'ZHR_SST_CONCUR_MSG' TYPE 'E' NUMBER 002.
     STOP.
   ENDIF.
+
   ls_csv_row = 'TRIP_ID,PERNR,PERNR_RBA,ZLAND,DATV1,DATB1,DATES,TIMES,ANKEY,NAME,STRAS,HAUSN,PLZ,ORT,TW_STATUS,FDF_KOSTL_PERNR,FDF_AUFNR_TRIP'.
   INSERT ls_csv_row INTO gt_csv_table INDEX 1.
 ENDFORM.
@@ -573,7 +570,7 @@ FORM save_data .
   IF p_test IS INITIAL.
 *TODO: Update the table
     LOOP AT gt_log INTO ls_log.
-      MODIFY ZHRSST_A1_2 FROM ls_log.
+      MODIFY zhrsst_a1_2 FROM ls_log.
       IF sy-subrc <> 0.
         MESSAGE ID 'ZHR_SST_CONCUR_MSG' TYPE 'I' NUMBER 005 INTO lv_message.
         WRITE:/ lv_message.
