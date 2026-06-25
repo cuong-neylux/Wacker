@@ -1,0 +1,25 @@
+1. em test o ERP o cai Z report nao do coi code tu 409 toi 425 co work khong, xem cai ls_address_data co du lieu khong ay
+2. la o WK5 em test trong debugging voi cai Request ID 20FCB99D2713174595DB606CFAB4FF2B
+Set status o table *REQ*03* la 20
+break point o CHECK and CREATE 
+action report Prod mode
+
+3.
+O CHECK va CREATE em phai tu fill cai bang nay roi moi chay tiep (lt_personee)
+00060921
+00217790
+20190501
+
+4.
+Chay CHECK 3 hay 4 lan gi do roi toi CREATE, o CREATE cung fill cai lt_personee tuong tu roi chay toi dong nay 
+380
+
+5.
+neu cai ID ma khong phai OTHER thi return, con neu la OTHER thi em phai jump ra coi cai IF do va chay tiep toi day 
+
+6.
+Sau cai Endselect em phai tu fill cai adresse cua ls_request 
+
+7.
+Sau do em F8, expect la A1 save o Status Submitted va Co email voi Formulare
+
