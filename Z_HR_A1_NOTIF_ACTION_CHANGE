@@ -1,0 +1,149 @@
+*&---------------------------------------------------------------------*
+*& Report /nyx/bs_xx_hr11_v01
+*&---------------------------------------------------------------------*
+*&
+*&---------------------------------------------------------------------*
+REPORT zq_test.
+
+*   Lokale daten
+DATA: ls_hdr TYPE /nyx/a1_hdr.
+DATA: lt_dest TYPE TABLE OF /nyx/a1_dest.
+DATA: ls_dest TYPE /nyx/a1_dest.
+DATA: ls_data_dest TYPE /nyx/a1_dest_s.
+DATA: ls_hist_old TYPE /nyx/a1_hist.
+DATA: ls_hist_new TYPE /nyx/a1_hist.
+DATA: lv_error_occurred TYPE flag.
+DATA: lv_msg TYPE bapi_msg.
+DATA: lv_bsnr TYPE /nyx/a1_anr.
+DATA: lv_modify_hist TYPE flag.
+
+DATA: BEGIN OF ls_key,
+        employeenumber TYPE persno,
+        a1mnr          TYPE /nyx/a1_mnr,
+      END OF ls_key.
+
+*   Header vorbereiten
+*    gs_data-hdr-user_action = iv_action.
+*    MOVE-CORRESPONDING gs_data-hdr TO ls_hdr.
+CLEAR ls_hdr-transit_ref.
+
+*   Datenbank schreiben
+*   Header
+CLEAR lv_error_occurred.
+DELETE /nyx/a1_hdr FROM ls_hdr.
+IF sy-subrc <> 0.
+  lv_error_occurred = abap_true.
+ENDIF.
+
+*   Dest
+IF lv_error_occurred = abap_false .
+  SELECT COUNT(*) FROM /nyx/a1_dest WHERE
+        pernr = ls_hdr-pernr AND
+        a1mnr = ls_hdr-a1mnr.
+  IF sy-subrc = 0.
+    DELETE FROM /nyx/a1_dest
+    WHERE
+      pernr = ls_hdr-pernr AND
+      a1mnr = ls_hdr-a1mnr.
+    IF sy-subrc <> 0.
+      lv_error_occurred = abap_true.
+    ENDIF.
+  ELSE.
+    lv_error_occurred = abap_false.
+  ENDIF.
+ENDIF.
+
+** Hist
+*    IF lv_error_occurred = abap_false AND
+*       lv_modify_hist = abap_true.
+*      IF ls_hist_old IS NOT INITIAL.
+*        MODIFY /NYX/A1_HIST FROM ls_hist_old.
+*      ENDIF.
+*      IF sy-subrc <> 0.
+*        lv_error_occurred = abap_true.
+*      ENDIF.
+*    ENDIF.
+****
+
+*   Hist aktualisieren - nicht löschen
+IF lv_error_occurred = abap_false.
+*     Aktuellen Satz ändern
+  SELECT SINGLE * FROM /nyx/a1_hist INTO ls_hist_old
+    WHERE
+      pernr = ls_hdr-pernr AND
+      a1mnr = ls_hdr-a1mnr AND
+      date_to = '00000000'.                               "#EC CI_SUBRC
+
+  ls_hist_new = ls_hist_old.
+  ls_hist_new-date_to = sy-datum.
+  ls_hist_new-time_to = sy-uzeit.
+  MODIFY /nyx/a1_hist FROM ls_hist_new.              "#EC "#EC CI_SUBRC
+  COMMIT WORK AND WAIT.
+  IF sy-subrc <> 0.
+    lv_error_occurred = abap_true.
+  ENDIF.
+  CLEAR: ls_hist_new-vp_date, ls_hist_new-vp_time, ls_hist_new-vp_action.
+ENDIF.
+
+IF lv_error_occurred = abap_false.
+*     neuen Satz hinzufügen
+  ADD 1 TO ls_hist_new-prtnr.
+  ls_hist_new-pernr = ls_hdr-pernr.
+  ls_hist_new-a1mnr = ls_hdr-a1mnr.
+  ls_hist_new-date_from = ls_hist_new-date_to.
+  ls_hist_new-date_from = ls_hist_new-date_to.
+  ls_hist_new-time_from = ls_hist_new-time_to.
+  CLEAR ls_hist_new-date_to.
+  CLEAR ls_hist_new-time_to.
+  ls_hist_new-status = /nyx/cl_a1_util=>gc_status_deleted.
+  ls_hist_new-action = /nyx/cl_a1_util=>gc_action_delete.
+  ls_hist_new-usrid = sy-uname.
+  ls_hist_new-repid = sy-repid.
+  ls_hist_new-begda = ls_hdr-begda.
+  ls_hist_new-endda = ls_hdr-endda.
+  ls_hist_new-land = ls_hdr-land.
+  ls_hist_new-guid_cnect = ls_hdr-guid_cnect.
+
+  INSERT /nyx/a1_hist FROM ls_hist_new.              "#EC "#EC CI_SUBRC
+  COMMIT WORK AND WAIT.
+  IF sy-subrc <> 0.
+    MODIFY /nyx/a1_hist FROM ls_hist_new.            "#EC "#EC CI_SUBRC
+    COMMIT WORK AND WAIT.
+    IF sy-subrc <> 0.
+      lv_error_occurred = abap_true.
+    ENDIF.
+  ENDIF.
+ENDIF.
+
+*    IF ls_hist_old IS INITIAL.
+** nothing to delete
+*    ELSE.
+** set the variable to indicate deletion
+*      lv_modify_hist = abap_true.
+*    ENDIF.
+
+*    IF lv_error_occurred = abap_false AND
+*       lv_modify_hist = abap_true.
+*      DELETE FROM /NYX/A1_HIST WHERE pernr = gs_data-hdr-pernr AND a1mnr = gs_data-hdr-a1mnr .
+*      IF sy-subrc <> 0.
+*        lv_error_occurred = abap_true.
+*      ENDIF.
+*    ENDIF.
+
+*   Error handling
+IF lv_error_occurred = abap_false.
+  COMMIT WORK AND WAIT.
+  ls_key-employeenumber = ls_hdr-pernr.
+  ls_key-a1mnr = ls_hdr-a1mnr.
+  DELETE FROM DATABASE indx(za) ID ls_key.
+  IF sy-subrc = 0.
+  ENDIF.
+ELSE.
+  ROLLBACK WORK.
+  MESSAGE ID '/NYX/A1' TYPE 'E' NUMBER 088 INTO lv_msg.
+
+*  so_context->add_msg(
+*    EXPORTING
+*      iv_create_exception = abap_true
+*  ).
+ENDIF.
