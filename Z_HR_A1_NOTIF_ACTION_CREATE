@@ -89,12 +89,14 @@ FUNCTION zhr_sst_a1_notif_action_create.
   DATA ls_t536c TYPE t536c.
   DATA ls_addr1_sel TYPE addr1_sel.
   DATA ls_address_data TYPE addr1_val.
+  DATA lv_sender_mail TYPE adr6-smtp_addr.
 
   FIELD-SYMBOLS <msg> TYPE bapiret2.
   FIELD-SYMBOLS: <dest> TYPE /nyx/a1_dest_s.
 
   CLEAR: lv_msg1,lv_msg2.
 
+  lv_sender_mail = 'dienstreise.compliance@wacker.com'.
 ********************************************************************************
 * Berechtigungsprüfung
 *******************************************************************************
@@ -639,7 +641,7 @@ FUNCTION zhr_sst_a1_notif_action_create.
               it_attachments      = lt_attachment      "
               iv_sender_uid       = lv_sender_usrid
 *             iv_recipient_uid    = recipient_uid    "
-*             iv_sender_mail      = sender_mail      "
+              iv_sender_mail      = lv_sender_mail
               iv_recipient_mail   = lv_recipient_mail
 *             it_recipients       = recipients
               iv_send_immediately = 'X'             "
@@ -773,7 +775,7 @@ FUNCTION zhr_sst_a1_notif_action_create.
 *         it_attachments      = attachments      "
           iv_sender_uid       = lv_sender_usrid
 *         iv_recipient_uid    = recipient_uid    "
-*         iv_sender_mail      = sender_mail      "
+          iv_sender_mail      = lv_sender_mail
           iv_recipient_mail   = lv_recipient_mail
 *         it_recipients       = recipients
           iv_send_immediately = 'X'             "
@@ -860,7 +862,7 @@ FUNCTION zhr_sst_a1_notif_action_create.
           it_attachments      = lt_attachment      "
           iv_sender_uid       = lv_sender_usrid
 *             iv_recipient_uid    = recipient_uid    "
-*             iv_sender_mail      = sender_mail      "
+          iv_sender_mail      = lv_sender_mail
           iv_recipient_mail   = lv_recipient_mail
 *             it_recipients       = recipients
           iv_send_immediately = 'X'             "
@@ -964,7 +966,7 @@ FUNCTION zhr_sst_a1_notif_action_create.
 *         it_attachments      = attachments      "
         iv_sender_uid       = lv_sender_usrid
 *         iv_recipient_uid    = recipient_uid    "
-*         iv_sender_mail      = sender_mail      "
+        iv_sender_mail      = lv_sender_mail
         iv_recipient_mail   = lv_recipient_mail
 *         it_recipients       = recipients
         iv_send_immediately = 'X'             "
