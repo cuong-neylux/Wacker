@@ -1,0 +1,102 @@
+DATA: ls_hdr TYPE /nyx/a1_hdr.
+DATA ls_request TYPE /nyx/a1_request_s.
+DATA ls_request_del TYPE /nyx/a1_request_s.
+DATA: lt_dest TYPE TABLE OF /nyx/a1_dest.
+DATA: ls_dest TYPE /nyx/a1_dest.
+DATA: ls_data_dest TYPE /nyx/a1_dest_s.
+DATA: ls_hist_old TYPE /nyx/a1_hist.
+DATA: ls_hist_new TYPE /nyx/a1_hist.
+DATA: lv_error_occurred TYPE flag.
+DATA: lv_msg TYPE bapi_msg.
+DATA: lv_bsnr TYPE /nyx/a1_anr.
+DATA: lv_modify_hist TYPE flag.
+DATA lv_success TYPE char1.
+DATA lt_actions TYPE /nyx/a1_sync_0700_act_tt.
+DATA gt_result TYPE TABLE OF /nyx/a1_sync_0700_alv.
+DATA lv_a1mnr TYPE /nyx/a1_mnr.
+
+FIELD-SYMBOLS <ls_result> TYPE /nyx/a1_sync_0700_alv.
+FIELD-SYMBOLS <ls_msg> TYPE bapiret2.
+
+
+* Lösche Eintrag im IT0700 über FuBa
+TRY.
+    CLEAR: lv_success.
+    CALL METHOD /nyx/cl_a1_mgr=>check_dxa_overlap_do_action
+      EXPORTING
+        is_request = ls_request
+      IMPORTING
+        ev_success = lv_success.
+  CATCH /nyx/cx_a1_exception .
+ENDTRY.
+
+IF lv_success IS INITIAL.
+* A1 bereits vorhanden - Änderung von bestehenden A1 mit überlappenem Zeitraum
+* Lösche Eintrag im A1-Manager über Delete Methods
+  SELECT SINGLE * FROM /nyx/a1_hdr INTO ls_hdr WHERE
+       land = ls_request-countrycode AND
+       cancelled <> 'X' AND
+      ( ( begda <= ls_request-startdate AND endda >= ls_request-startdate ) OR
+        ( begda <= ls_request-enddate AND endda >= ls_request-enddate ) ).
+
+  MOVE-CORRESPONDING  ls_hdr TO ls_request_del.
+  ls_request_del-startdate = ls_hdr-begda.
+  ls_request_del-enddate = ls_hdr-endda.
+  ls_request_del-countrycode = ls_hdr-land.
+
+  DATA: go_a1_notif TYPE REF TO /nyx/cl_a1_notif.
+  DATA: go_context TYPE REF TO /nyx/cl_a1_context.
+  DATA: gv_msg TYPE bapiret2.
+  DATA: gv_error TYPE char1.
+  CLEAR go_a1_notif.
+  go_context = /nyx/cl_a1_context=>get_instance( iv_refresh = abap_true ).
+  TRY.
+*    go_a1_notif = /nyx/cl_a1_notif=>createfromdb( iv_pernr = ls_request-pernr iv_a1mnr = ls_request-a1mnr ).
+      go_a1_notif = /nyx/cl_a1_notif=>createfromdb( iv_pernr = ls_request_del-pernr iv_a1mnr = ls_request_del-a1mnr ).
+      go_a1_notif->deletefromdb( ).
+    CATCH /nyx/cx_a1_exception.
+      LOOP AT go_context->get_msg( ) INTO gv_msg.
+      ENDLOOP.
+      gv_error = 'X'.
+  ENDTRY.
+  IF gv_error IS NOT INITIAL.
+*   Suitable Error Message
+  ENDIF.
+
+* Lösche Eintrag im IT0700 über FuBa
+*     P0700 schreiben
+  TRY.
+      /nyx/cl_a1_mgr=>sync_0700_dxa1(
+        EXPORTING
+          iv_pernr  = ls_request_del-pernr
+          iv_begda  = ls_request_del-startdate
+          iv_endda  = ls_request_del-enddate
+          iv_update = 'X'
+          iv_userfc = ''
+        IMPORTING
+          et_actions = lt_actions ).
+    CATCH /nyx/cx_a1_exception. " A1: Exception Klasse
+*       Hmm... Eine Message ist im Context
+      LOOP AT go_context->get_msg( ) ASSIGNING <ls_msg>.
+        APPEND INITIAL LINE TO gt_result ASSIGNING <ls_result>.
+        MOVE-CORRESPONDING <ls_msg> TO <ls_result>.
+        <ls_result>-pernr = ls_request-pernr.
+*        <ls_result>-ename = p0001-ename.
+*        <ls_result>-bukrs = p0001-bukrs.
+      ENDLOOP.
+*       Eine weitere Bearbeitung der Actions macht keinen Sinn
+      EXIT.
+  ENDTRY.
+ELSE.
+* Änderung von bestehendem A1 ohne überlappenem Zeitraum / mit einem anderen Land / Hinzufügen von neuem A1 Segment
+*  man muss keine Löschung machen, sondern nur neuen A1 in /nyx/a1 hinzufügen.
+ENDIF.
+
+* Erstelle neuen A1-Antrag im A1-Manager und SUBMIT
+* Submit A1
+CALL METHOD /nyx/cl_a1_mgr=>submit_from_concur_do_action
+  EXPORTING
+    is_request = ls_request
+  IMPORTING
+    ev_a1mnr   = lv_a1mnr
+    ev_success = lv_success.
