@@ -80,6 +80,7 @@ FUNCTION zhr_sst_a1_notif_action_change.
   DATA ls_sccoreq18v4 TYPE /nyx/sccoreq18v4.
   DATA lt_sccoreq18v4 TYPE TABLE OF /nyx/sccoreq18v4.
   DATA ls_sccoreq19v4 TYPE /nyx/sccoreq19v4.
+  DATA ls_sccoreq21v4 TYPE /nyx/sccoreq21v4.
   DATA ls_t536c TYPE t536c.
   DATA ls_addr1_sel TYPE addr1_sel.
   DATA ls_address_data TYPE addr1_val.
@@ -89,6 +90,7 @@ FUNCTION zhr_sst_a1_notif_action_change.
   DATA go_context TYPE REF TO /nyx/cl_a1_context.
   DATA gv_msg TYPE bapiret2.
   DATA gv_error TYPE char1.
+  DATA lv_del TYPE wdy_boolean.
 
   FIELD-SYMBOLS <ls_result> TYPE /nyx/a1_sync_0700_alv.
   FIELD-SYMBOLS <msg> TYPE bapiret2.
@@ -231,6 +233,7 @@ FUNCTION zhr_sst_a1_notif_action_change.
 
   " We only process requests with the expense type for A1
   " To get the expense type of this request we first need its trip segment leg
+  CLEAR: ls_sccoreq18v4.
   SELECT SINGLE * FROM /nyx/sccoreq18v4 INTO CORRESPONDING FIELDS OF  ls_sccoreq18v4
     WHERE
       doc_id = ls_request-doc_id AND
@@ -371,7 +374,7 @@ FUNCTION zhr_sst_a1_notif_action_change.
 
 * Check Overlapping
   TRY.
-      CLEAR: lv_success.
+      CLEAR: lv_success, lv_del.
       CALL METHOD /nyx/cl_a1_mgr=>check_dxa_overlap_do_action
         EXPORTING
           is_request = ls_request
@@ -382,7 +385,57 @@ FUNCTION zhr_sst_a1_notif_action_change.
 
   IF lv_success IS INITIAL.
 * A1 bereits vorhanden - Änderung von bestehenden A1 mit überlappenem Zeitraum
-* Lösche Eintrag im A1-Manager über Delete Methods
+* Löschung von alter A1
+    lv_del = 'X'.
+  ELSE.
+* Keine Überlappung -> Änderung von bestehendem A1 ohne überlappenem Zeitraum / mit einem anderen Land / Hinzufügen von neuem A1 Segment
+
+* Fallsunterscheidung:
+* 1. Handelt es sich um eine Änderung in bestehendem Segment, aber mit neuem nicht überlappendem Zeiraum?
+*    -> Löschung von alter A1
+* 2. Handelt es sich um eine Änderung in bestehendem Segment, aber mit neuem Land?
+*    -> Löschung von alter A1
+* 3. Handelt es sich um ein kommplett neues Segment?
+*    -> passt so, nichts löschen
+* 4. Handelt es sich um ein Löschung bestehendes Segments?
+*    -> Löschung von alter A1
+
+* wir versuchen Fall 1, 2, 4 zu finden.
+
+* Finde die für dieses Segment erstellte A1 Nr.
+    CLEAR: ls_sccoreq21v4.
+    SELECT SINGLE * FROM /nyx/sccoreq21v4 INTO CORRESPONDING FIELDS OF ls_sccoreq21v4
+      WHERE
+        doc_id = ls_request-doc_id AND
+        segmentlegid = ls_request-segment_id AND
+        proc_value <> '' AND
+        time_stamp = lv_timestamp.
+    IF sy-subrc = 0.
+      CLEAR: ls_hdr.
+      SELECT SINGLE * FROM /nyx/a1_hdr INTO ls_hdr WHERE
+           a1mnr = ls_sccoreq21v4-proc_value.
+      IF ls_hdr-land <> ls_request-countrycode OR   "Fall 2
+         ls_request-enddate <  ls_hdr-begda OR      "Fall 1
+         ls_request-startdate >  ls_hdr-endda.      "Fall 1
+        lv_del = 'X'.
+      ELSE.
+        SELECT SINGLE * FROM /nyx/sccoreq22v4 INTO CORRESPONDING FIELDS OF ls_sccoreq21v4
+          WHERE
+            doc_id = ls_request-doc_id AND
+            segmentlegid = ls_request-segment_id AND
+            change_type = 'DEL' AND
+            timestamp_actual = lv_timestamp.
+        IF sy-subrc = 0.
+          lv_del = 'X'.   " Fall 4
+        ENDIF.
+      ENDIF.
+    ELSE.
+      CLEAR: lv_del. "Fall 3
+    ENDIF.
+  ENDIF.
+
+  IF lv_del = 'X'.
+*  Lösche Eintrag im A1-Manager über Delete Methods
     CLEAR: ls_hdr, ls_request_del.
     SELECT SINGLE * FROM /nyx/a1_hdr INTO ls_hdr WHERE
          land = ls_request-countrycode AND
@@ -408,7 +461,7 @@ FUNCTION zhr_sst_a1_notif_action_change.
 *   Suitable Error Message
     ENDIF.
 
-* Lösche Eintrag im IT0700 über FuBa
+*   Lösche Eintrag im IT0700 über FuBa
 *     P0700 schreiben
     TRY.
         /nyx/cl_a1_mgr=>sync_0700_dxa1(
@@ -432,13 +485,10 @@ FUNCTION zhr_sst_a1_notif_action_change.
 *       Eine weitere Bearbeitung der Actions macht keinen Sinn
         EXIT.
     ENDTRY.
-  ELSE.
-* Keine Überlappung -> Änderung von bestehendem A1 ohne überlappenem Zeitraum / mit einem anderen Land / Hinzufügen von neuem A1 Segment
-* man muss keine Löschung machen, sondern nur neue A1 in /nyx/a1 hinzufügen.
   ENDIF.
+* wir haben alles gelöscht, was wir löschen müssen.
+* jetzt erstellen wir neuen A1-Antrag im A1-Manager und SUBMIT
 
-* Erstelle neuen A1-Antrag im A1-Manager und SUBMIT
-* Submit A1
   IF ls_request-name_bs IS NOT INITIAL AND
      ls_request-strasse_bs IS NOT INITIAL AND
 *     ls_request-hausnr_bs IS NOT INITIAL AND
