@@ -68,6 +68,11 @@ FUNCTION zhr_sst_a1_notif_action_delete.
   DATA lv_msg TYPE bapi_msg.
   DATA lv_bsnr TYPE /nyx/a1_anr.
   DATA lv_modify_hist TYPE flag.
+  DATA go_a1_notif TYPE REF TO /nyx/cl_a1_notif.
+  DATA go_context TYPE REF TO /nyx/cl_a1_context.
+  DATA gv_msg TYPE bapiret2.
+  DATA gv_error TYPE char1.
+
   DATA: BEGIN OF ls_key,
           employeenumber TYPE persno,
           a1mnr          TYPE /nyx/a1_mnr,
@@ -276,22 +281,24 @@ FUNCTION zhr_sst_a1_notif_action_delete.
 *  ev_value03 =
 *  ev_value04 =
 *  ev_value05 =
-** Delete A1, if customer wants this
-** Be careful - the A1 will be deleted in A1-Manager and Infotype 0700
-*  DATA: go_a1_notif TYPE REF TO /nyx/cl_a1_notif.
-*  DATA: go_context TYPE REF TO /nyx/cl_a1_context.
-*  DATA: gv_msg TYPE bapiret2.
-*  DATA: gv_error TYPE char1.
-*  CLEAR go_a1_notif.
-*  go_context = /nyx/cl_a1_context=>get_instance( iv_refresh = abap_true ).
-*  TRY.
-*      go_a1_notif = /nyx/cl_a1_notif=>createfromdb( iv_pernr = ls_request-pernr iv_a1mnr = ls_request-a1mnr ).
-*      go_a1_notif->deletefromdb( ).
-*    CATCH /nyx/cx_a1_exception.
-*      LOOP AT go_context->get_msg( ) INTO gv_msg.
-*      ENDLOOP.
-*      gv_error = 'X'.
-*  ENDTRY.
-*  IF gv_error IS NOT INITIAL.
-**   Suitable Error Message
-*  ENDIF.
+*   Header vorbereiten
+*    gs_data-hdr-user_action = iv_action.
+*    MOVE-CORRESPONDING gs_data-hdr TO ls_hdr.
+
+* Delete A1, if customer wants this
+* Be careful - the A1 will be deleted in A1-Manager and Infotype 0700
+
+  CLEAR go_a1_notif.
+  go_context = /nyx/cl_a1_context=>get_instance( iv_refresh = abap_true ).
+  TRY.
+      go_a1_notif = /nyx/cl_a1_notif=>createfromdb( iv_pernr = ls_request-pernr iv_a1mnr = ls_request-a1mnr ).
+      go_a1_notif->deletefromdb( ).
+    CATCH /nyx/cx_a1_exception.
+      LOOP AT go_context->get_msg( ) INTO gv_msg.
+      ENDLOOP.
+      gv_error = 'X'.
+  ENDTRY.
+  IF gv_error IS NOT INITIAL.
+*   Suitable Error Message
+  ENDIF.
+ENDFUNCTION.
