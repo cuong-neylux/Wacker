@@ -276,101 +276,22 @@ FUNCTION zhr_sst_a1_notif_action_delete.
 *  ev_value03 =
 *  ev_value04 =
 *  ev_value05 =
-*   Header vorbereiten
-*    gs_data-hdr-user_action = iv_action.
-*    MOVE-CORRESPONDING gs_data-hdr TO ls_hdr.
-  SELECT SINGLE * FROM /nyx/a1_hdr INTO ls_hdr WHERE a1mnr = ls_request-a1mnr.
-  IF sy-subrc = 0.
-    CLEAR ls_hdr-transit_ref.
-
-*   Datenbank schreiben
-*   Header
-    CLEAR lv_error_occurred.
-    DELETE /nyx/a1_hdr FROM ls_hdr.
-    IF sy-subrc <> 0.
-      lv_error_occurred = abap_true.
-    ENDIF.
-
-*   Dest
-    IF lv_error_occurred = abap_false .
-      SELECT COUNT(*) FROM /nyx/a1_dest WHERE
-            pernr = ls_hdr-pernr AND
-            a1mnr = ls_hdr-a1mnr.
-      IF sy-subrc = 0.
-        DELETE FROM /nyx/a1_dest
-        WHERE
-          pernr = ls_hdr-pernr AND
-          a1mnr = ls_hdr-a1mnr.
-        IF sy-subrc <> 0.
-          lv_error_occurred = abap_true.
-        ENDIF.
-      ELSE.
-        lv_error_occurred = abap_false.
-      ENDIF.
-    ENDIF.
-
-*   Hist aktualisieren - nicht löschen
-    IF lv_error_occurred = abap_false.
-*     Aktuellen Satz ändern
-      SELECT SINGLE * FROM /nyx/a1_hist INTO ls_hist_old
-        WHERE
-          pernr = ls_hdr-pernr AND
-          a1mnr = ls_hdr-a1mnr AND
-          date_to = '00000000'.                           "#EC CI_SUBRC
-
-      ls_hist_new = ls_hist_old.
-      ls_hist_new-date_to = sy-datum.
-      ls_hist_new-time_to = sy-uzeit.
-      MODIFY /nyx/a1_hist FROM ls_hist_new.          "#EC "#EC CI_SUBRC
-      COMMIT WORK AND WAIT.
-      IF sy-subrc <> 0.
-        lv_error_occurred = abap_true.
-      ENDIF.
-      CLEAR: ls_hist_new-vp_date, ls_hist_new-vp_time, ls_hist_new-vp_action.
-    ENDIF.
-
-    IF lv_error_occurred = abap_false.
-*     neuen Satz hinzufügen
-      ADD 1 TO ls_hist_new-prtnr.
-      ls_hist_new-pernr = ls_hdr-pernr.
-      ls_hist_new-a1mnr = ls_hdr-a1mnr.
-      ls_hist_new-date_from = ls_hist_new-date_to.
-      ls_hist_new-date_from = ls_hist_new-date_to.
-      ls_hist_new-time_from = ls_hist_new-time_to.
-      CLEAR ls_hist_new-date_to.
-      CLEAR ls_hist_new-time_to.
-      ls_hist_new-status = /nyx/cl_a1_util=>gc_status_deleted.
-      ls_hist_new-action = /nyx/cl_a1_util=>gc_action_delete.
-      ls_hist_new-usrid = sy-uname.
-      ls_hist_new-repid = sy-repid.
-      ls_hist_new-begda = ls_hdr-begda.
-      ls_hist_new-endda = ls_hdr-endda.
-      ls_hist_new-land = ls_hdr-land.
-      ls_hist_new-guid_cnect = ls_hdr-guid_cnect.
-
-      INSERT /nyx/a1_hist FROM ls_hist_new.          "#EC "#EC CI_SUBRC
-      COMMIT WORK AND WAIT.
-      IF sy-subrc <> 0.
-        MODIFY /nyx/a1_hist FROM ls_hist_new.        "#EC "#EC CI_SUBRC
-        COMMIT WORK AND WAIT.
-        IF sy-subrc <> 0.
-          lv_error_occurred = abap_true.
-        ENDIF.
-      ENDIF.
-    ENDIF.
-
-*   Error handling
-    IF lv_error_occurred = abap_false.
-      COMMIT WORK AND WAIT.
-      ls_key-employeenumber = ls_hdr-pernr.
-      ls_key-a1mnr = ls_hdr-a1mnr.
-      DELETE FROM DATABASE indx(za) ID ls_key.
-      IF sy-subrc = 0.
-      ENDIF.
-    ELSE.
-      ROLLBACK WORK.
-      MESSAGE ID '/NYX/A1' TYPE 'W' NUMBER 088 INTO lv_msg.
-    ENDIF.
-  ENDIF.
-
-ENDFUNCTION.
+** Delete A1, if customer wants this
+** Be careful - the A1 will be deleted in A1-Manager and Infotype 0700
+*  DATA: go_a1_notif TYPE REF TO /nyx/cl_a1_notif.
+*  DATA: go_context TYPE REF TO /nyx/cl_a1_context.
+*  DATA: gv_msg TYPE bapiret2.
+*  DATA: gv_error TYPE char1.
+*  CLEAR go_a1_notif.
+*  go_context = /nyx/cl_a1_context=>get_instance( iv_refresh = abap_true ).
+*  TRY.
+*      go_a1_notif = /nyx/cl_a1_notif=>createfromdb( iv_pernr = ls_request-pernr iv_a1mnr = ls_request-a1mnr ).
+*      go_a1_notif->deletefromdb( ).
+*    CATCH /nyx/cx_a1_exception.
+*      LOOP AT go_context->get_msg( ) INTO gv_msg.
+*      ENDLOOP.
+*      gv_error = 'X'.
+*  ENDTRY.
+*  IF gv_error IS NOT INITIAL.
+**   Suitable Error Message
+*  ENDIF.
