@@ -85,6 +85,10 @@ FUNCTION zhr_sst_a1_notif_action_change.
   DATA ls_address_data TYPE addr1_val.
   DATA lv_msg1 TYPE char50.
   DATA lv_msg2 TYPE char50.
+  DATA go_a1_notif TYPE REF TO /nyx/cl_a1_notif.
+  DATA go_context TYPE REF TO /nyx/cl_a1_context.
+  DATA gv_msg TYPE bapiret2.
+  DATA gv_error TYPE char1.
 
   FIELD-SYMBOLS <ls_result> TYPE /nyx/a1_sync_0700_alv.
   FIELD-SYMBOLS <msg> TYPE bapiret2.
@@ -126,17 +130,6 @@ FUNCTION zhr_sst_a1_notif_action_change.
 ********************************************************************************
 * Data mapping
 ********************************************************************************
-*  ls_request-ncid = iv_value01.
-*  ls_request- = iv_value02.
-*  ls_request- = iv_value03.
-*  ls_request- = iv_value04.
-*  ls_request- = iv_value05.
-*  ls_request- = iv_string01.
-*  ls_request- = iv_string02.
-*  ls_request- = iv_string03.
-*  ls_request- = iv_string04.
-*  ls_request- = iv_string05.
-
   LOOP AT ct_kv01 INTO ls_kv.
     CASE ls_kv-skey.
       WHEN '@PERNR@'.
@@ -230,75 +223,10 @@ FUNCTION zhr_sst_a1_notif_action_change.
     APPEND ls_kv TO lt_key_value_param.
   ENDLOOP.
 
-*  LOOP AT ct_kv02 INTO ls_kv.
-*  ENDLOOP.
-*
-*  LOOP AT ct_kv03 INTO ls_kv.
-*  ENDLOOP.
-*
-*  LOOP AT ct_kv04 INTO ls_kv.
-*  ENDLOOP.
-*
-*  LOOP AT ct_kv05 INTO ls_kv.
-*  ENDLOOP.
-*
-*  LOOP AT ct_kv06 INTO ls_kv.
-*  ENDLOOP.
-*
-*  LOOP AT ct_kv07 INTO ls_kv.
-*  ENDLOOP.
-*
-*  LOOP AT ct_kv08 INTO ls_kv.
-*  ENDLOOP.
-*
-*  LOOP AT ct_kv09 INTO ls_kv.
-*  ENDLOOP.
-*
-*  LOOP AT ct_kv10 INTO ls_kv.
-*  ENDLOOP.
 
   IF ls_request-segment_id IS INITIAL.
 *   ignore the expense with empty segment, go to next segment
     RETURN.
-  ELSE.
-* Von hier vorläufig auskommentiert - 01.04.2026
-*    IF ls_request-countrycode IS INITIAL.
-*      CLEAR: ls_sccoreq19v4.
-*      SELECT SINGLE * FROM /nyx/sccoreq19v4 INTO CORRESPONDING FIELDS OF ls_sccoreq19v4
-*        WHERE
-*        doc_id = ls_request-doc_id AND
-*        segmentlegid = ls_request-segment_id AND
-*        customfieldname = 'CUSTOM1' AND     "Landx
-*        time_stamp = lv_timestamp.
-*      IF sy-subrc = 0.
-*        CLEAR: ls_t005t.
-*        SELECT SINGLE * FROM t005t INTO CORRESPONDING FIELDS OF ls_t005t
-*          WHERE landx = ls_sccoreq19v4-value.
-**      CLEAR: lt_sccoreq18v4, ls_sccoreq18v4.
-**      SELECT * FROM /nyx/sccoreq18v4 INTO TABLE lt_sccoreq18v4
-**        WHERE doc_id = ls_request-doc_id AND
-**          time_stamp = lv_timestamp.
-***     find the right segment id
-**      LOOP AT lt_sccoreq18v4 INTO ls_sccoreq18v4.
-**        SELECT SINGLE * FROM /nyx/sccoreq21v4 INTO CORRESPONDING FIELDS OF ls_sccoreq21v4
-**          WHERE doc_id = ls_sccoreq18v4-doc_id AND
-**          segmentlegid = ls_sccoreq18v4-segmentlegid AND
-**          startdate = ls_sccoreq18v4-startdate AND
-**          enddate = ls_sccoreq18v4-enddate AND
-**          time_stamp = lv_timestamp.
-*        IF sy-subrc = 0.
-*          ls_request-segment_id = ls_sccoreq19v4-segmentlegid.
-*          ls_request-countrycode = ls_t005t-land1.
-*        ELSE.
-**       ignore, go to next segment
-*          RETURN.
-*        ENDIF.
-*      ELSE.
-**     ignore, go to next segment
-*        RETURN.
-*      ENDIF.
-*    ENDIF.
-* Bis hier vorläufig auskommentiert - 01.04.2026
   ENDIF.
 
   " We only process requests with the expense type for A1
@@ -378,14 +306,12 @@ FUNCTION zhr_sst_a1_notif_action_change.
             ls_request-ort_bs = ls_address_data-city1.
           ENDIF.
         ENDIF.
-
     ENDCASE.
   ENDSELECT.
 
 ********************************************************************************
 *Perform mandatory checks for A1 creation: Check Country's validity for A1
 ********************************************************************************
-
 * Check country
   SELECT SINGLE * FROM /nyx/a1_cctry INTO ls_cctry
     WHERE
@@ -436,7 +362,11 @@ FUNCTION zhr_sst_a1_notif_action_change.
   ENDIF.
 
 ********************************************************************************
-* Do action
+* Do action for Change:
+*1. Delete A1 from /nyx/a1
+*2. Delete A1 from PA0700
+*3. Submit A1 from Concur. If submit is sucessful, send email with form.
+*Else, save A1 draft and send mail
 ********************************************************************************
 
 * Check Overlapping
@@ -464,15 +394,9 @@ FUNCTION zhr_sst_a1_notif_action_change.
     ls_request_del-startdate = ls_hdr-begda.
     ls_request_del-enddate = ls_hdr-endda.
     ls_request_del-countrycode = ls_hdr-land.
-
-    DATA: go_a1_notif TYPE REF TO /nyx/cl_a1_notif.
-    DATA: go_context TYPE REF TO /nyx/cl_a1_context.
-    DATA: gv_msg TYPE bapiret2.
-    DATA: gv_error TYPE char1.
     CLEAR go_a1_notif.
     go_context = /nyx/cl_a1_context=>get_instance( iv_refresh = abap_true ).
     TRY.
-*    go_a1_notif = /nyx/cl_a1_notif=>createfromdb( iv_pernr = ls_request-pernr iv_a1mnr = ls_request-a1mnr ).
         go_a1_notif = /nyx/cl_a1_notif=>createfromdb( iv_pernr = ls_request_del-pernr iv_a1mnr = ls_request_del-a1mnr ).
         go_a1_notif->deletefromdb( ).
       CATCH /nyx/cx_a1_exception.
@@ -509,8 +433,8 @@ FUNCTION zhr_sst_a1_notif_action_change.
         EXIT.
     ENDTRY.
   ELSE.
-* Änderung von bestehendem A1 ohne überlappenem Zeitraum / mit einem anderen Land / Hinzufügen von neuem A1 Segment
-*  man muss keine Löschung machen, sondern nur neuen A1 in /nyx/a1 hinzufügen.
+* Keine Überlappung -> Änderung von bestehendem A1 ohne überlappenem Zeitraum / mit einem anderen Land / Hinzufügen von neuem A1 Segment
+* man muss keine Löschung machen, sondern nur neue A1 in /nyx/a1 hinzufügen.
   ENDIF.
 
 * Erstelle neuen A1-Antrag im A1-Manager und SUBMIT
@@ -520,6 +444,8 @@ FUNCTION zhr_sst_a1_notif_action_change.
 *     ls_request-hausnr_bs IS NOT INITIAL AND
      ls_request-plz_bs IS NOT INITIAL AND
      ls_request-ort_bs IS NOT INITIAL.
+
+*   Versuche zu submitten
     CALL METHOD /nyx/cl_a1_mgr=>submit_from_concur_do_action
       EXPORTING
         is_request = ls_request
@@ -527,7 +453,7 @@ FUNCTION zhr_sst_a1_notif_action_change.
         ev_a1mnr   = lv_a1mnr
         ev_success = lv_success.
 
-*     Send Mail
+*     Send Mail mit Vorformular
     /nyx/cl_a1_util=>send_mail(
       EXPORTING
         iv_pernr = ls_request-pernr
@@ -547,15 +473,15 @@ FUNCTION zhr_sst_a1_notif_action_change.
     ).
 
     IF lv_success IS INITIAL.
-* in case of errors , save as draft
+*   in case of errors , save as draft
 
 ********************************************************************************
 * Do action
 *->A1 Creation
 *->Send Email if A1 creation is unsuccessful
 ********************************************************************************
-*Proceed for A1 creation if the checks are successful
-* Create A1-Template
+*   Proceed for A1 creation if the checks are successful
+*   Create A1-Template
       CALL METHOD /nyx/cl_a1_mgr=>save_from_concur_do_action
         EXPORTING
           is_request = ls_request
@@ -610,7 +536,7 @@ FUNCTION zhr_sst_a1_notif_action_change.
         EXPORTING
           iv_pernr = ls_request-pernr
           iv_a1mnr = lv_a1mnr
-          iv_mailtype = lv_mailtype
+          iv_mailtype = '050'
           is_message = ls_message
 *         it_attachments      = attachments      "
           iv_sender_uid       = lv_sender_usrid
@@ -692,7 +618,7 @@ FUNCTION zhr_sst_a1_notif_action_change.
 
       ENDTRY.
 
-*     Send Mail
+*     Send Mail with form
       /nyx/cl_a1_util=>send_mail(
         EXPORTING
           iv_pernr = ls_request-pernr
@@ -744,8 +670,8 @@ FUNCTION zhr_sst_a1_notif_action_change.
 *->A1 Creation
 *->Send Email if A1 creation is successful
 ********************************************************************************
-*Proceed for A1 creation if the checks are successful
-* Create A1-Template
+*   Proceed for A1 creation if the checks are successful
+*   Create A1-Template
     CALL METHOD /nyx/cl_a1_mgr=>save_from_concur_do_action
       EXPORTING
         is_request = ls_request
@@ -779,7 +705,7 @@ FUNCTION zhr_sst_a1_notif_action_change.
         RETURN.
       ENDIF.
     ENDIF.
-*  ENDIF.
+
     ev_value01 = lv_a1mnr.
     CLEAR: lt_t005t,
            ls_t005t.
@@ -801,7 +727,7 @@ FUNCTION zhr_sst_a1_notif_action_change.
       EXPORTING
         iv_pernr = ls_request-pernr
         iv_a1mnr = lv_a1mnr
-        iv_mailtype = lv_mailtype
+        iv_mailtype = '050'
         is_message = ls_message
 *         it_attachments      = attachments      "
         iv_sender_uid       = lv_sender_usrid
@@ -841,10 +767,5 @@ FUNCTION zhr_sst_a1_notif_action_change.
       ENDIF.
     ENDIF.
   ENDIF.
-
-*  ev_value02 = .
-*  ev_value03 = .
-*  ev_value04 = .
-*  ev_value05 = .
 
 ENDFUNCTION.
