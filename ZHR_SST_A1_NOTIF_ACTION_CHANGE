@@ -1,102 +1,850 @@
-DATA: ls_hdr TYPE /nyx/a1_hdr.
-DATA ls_request TYPE /nyx/a1_request_s.
-DATA ls_request_del TYPE /nyx/a1_request_s.
-DATA: lt_dest TYPE TABLE OF /nyx/a1_dest.
-DATA: ls_dest TYPE /nyx/a1_dest.
-DATA: ls_data_dest TYPE /nyx/a1_dest_s.
-DATA: ls_hist_old TYPE /nyx/a1_hist.
-DATA: ls_hist_new TYPE /nyx/a1_hist.
-DATA: lv_error_occurred TYPE flag.
-DATA: lv_msg TYPE bapi_msg.
-DATA: lv_bsnr TYPE /nyx/a1_anr.
-DATA: lv_modify_hist TYPE flag.
-DATA lv_success TYPE char1.
-DATA lt_actions TYPE /nyx/a1_sync_0700_act_tt.
-DATA gt_result TYPE TABLE OF /nyx/a1_sync_0700_alv.
-DATA lv_a1mnr TYPE /nyx/a1_mnr.
+FUNCTION zhr_sst_a1_notif_action_change.
+*"----------------------------------------------------------------------
+*"*"Local Interface:
+*"  IMPORTING
+*"     VALUE(IV_VALUE01) TYPE  /NYX/A1_TEXT255 OPTIONAL
+*"     VALUE(IV_VALUE02) TYPE  /NYX/A1_TEXT255 OPTIONAL
+*"     VALUE(IV_VALUE03) TYPE  /NYX/A1_TEXT255 OPTIONAL
+*"     VALUE(IV_VALUE04) TYPE  /NYX/A1_TEXT255 OPTIONAL
+*"     VALUE(IV_VALUE05) TYPE  /NYX/A1_TEXT255 OPTIONAL
+*"     VALUE(IV_STRING01) TYPE  /NYX/A1_CUSTOMER OPTIONAL
+*"     VALUE(IV_STRING02) TYPE  /NYX/A1_CUSTOMER OPTIONAL
+*"     VALUE(IV_STRING03) TYPE  /NYX/A1_CUSTOMER OPTIONAL
+*"     VALUE(IV_STRING04) TYPE  /NYX/A1_CUSTOMER OPTIONAL
+*"     VALUE(IV_STRING05) TYPE  /NYX/A1_CUSTOMER OPTIONAL
+*"     VALUE(IV_FPCONTENT) TYPE  FPCONTENT OPTIONAL
+*"  EXPORTING
+*"     VALUE(ES_RETURN) TYPE  BAPIRET2
+*"     VALUE(EV_VALUE01) TYPE  /NYX/A1_TEXT255
+*"     VALUE(EV_VALUE02) TYPE  /NYX/A1_TEXT255
+*"     VALUE(EV_VALUE03) TYPE  /NYX/A1_TEXT255
+*"     VALUE(EV_VALUE04) TYPE  /NYX/A1_TEXT255
+*"     VALUE(EV_VALUE05) TYPE  /NYX/A1_TEXT255
+*"     VALUE(EV_FPCONTENT) TYPE  FPCONTENT
+*"  TABLES
+*"      CT_KV01 TYPE  /NYX/A1_KEY_VALUE_PARAM_TT OPTIONAL
+*"      CT_KV02 TYPE  /NYX/A1_KEY_VALUE_PARAM_TT OPTIONAL
+*"      CT_KV03 TYPE  /NYX/A1_KEY_VALUE_PARAM_TT OPTIONAL
+*"      CT_KV04 TYPE  /NYX/A1_KEY_VALUE_PARAM_TT OPTIONAL
+*"      CT_KV05 TYPE  /NYX/A1_KEY_VALUE_PARAM_TT OPTIONAL
+*"      CT_KV06 TYPE  /NYX/A1_KEY_VALUE_PARAM_TT OPTIONAL
+*"      CT_KV07 TYPE  /NYX/A1_KEY_VALUE_PARAM_TT OPTIONAL
+*"      CT_KV08 TYPE  /NYX/A1_KEY_VALUE_PARAM_TT OPTIONAL
+*"      CT_KV09 TYPE  /NYX/A1_KEY_VALUE_PARAM_TT OPTIONAL
+*"      CT_KV10 TYPE  /NYX/A1_KEY_VALUE_PARAM_TT OPTIONAL
+*"----------------------------------------------------------------------
 
-FIELD-SYMBOLS <ls_result> TYPE /nyx/a1_sync_0700_alv.
-FIELD-SYMBOLS <ls_msg> TYPE bapiret2.
+* Local data
+  DATA ls_request TYPE /nyx/a1_request_s.
+  DATA ls_request_del TYPE /nyx/a1_request_s.
+  DATA lv_date_char TYPE char10.
+  DATA ls_cctry TYPE /nyx/a1_cctry.
+  DATA lv_date TYPE dats.
+  DATA lv_text TYPE string.
+  DATA ls_kv TYPE /nyx/a1_key_val_param_s.
+  DATA ls_kv_1 TYPE /nyx/a1_key_val_param_s.
+  DATA lv_a1mnr TYPE /nyx/a1_mnr.
+  DATA lt_key_value_param TYPE /nyx/a1_key_value_param_tt.
+  DATA lv_sender_erusrid TYPE usrid.
+  DATA lv_sender_usrid TYPE usrid.
+  DATA lv_mailtype TYPE /nyx/a1_mailtype.
+  DATA lv_errecipient_mail TYPE comm_id_long.
+  DATA lv_recipient_mail TYPE comm_id_long.
+  DATA ls_message TYPE bapiret2.
+  DATA lv_success TYPE char1.
+  DATA ls_bapiret1 TYPE bapiret1.
+  DATA lv_timestamp TYPE timestamp.
+  DATA lv_pernr TYPE personid.
+  DATA lt_personid TYPE hrpersonid_tab.
+  DATA ls_personee TYPE hrpersonee_s.
+  DATA lt_personee TYPE hrpersonee_t.
+  DATA lt_p0001 TYPE TABLE OF p0001.
+  DATA ls_p0001 TYPE p0001.
+  DATA ls_t001 TYPE t001.
+  DATA ls_hdr TYPE /nyx/a1_hdr.
+  DATA ls_hdr_s TYPE /nyx/a1_hdr_s.
+  DATA lt_hdr TYPE /nyx/a1_hdr_tt.
+  DATA ls_clusterdata TYPE /nyx/a1_data_s.
+  DATA lv_bsnr TYPE /nyx/a1_anr.
+  DATA ls_dest TYPE /nyx/a1_dest_s.
+  DATA lv_pdf_string TYPE fpcontent.
+  DATA lt_binary TYPE solix_tab.
+  DATA lt_attachment TYPE rmps_t_post_content.
+  DATA ls_attachment TYPE rmps_post_content.
+  DATA lt_actions TYPE /nyx/a1_sync_0700_act_tt.
+  DATA gt_result TYPE TABLE OF /nyx/a1_sync_0700_alv.
+  DATA lt_t005t TYPE TABLE OF t005t.
+  DATA ls_t005t TYPE t005t.
+  DATA lv_sender_mail TYPE adr6-smtp_addr.
+  DATA ls_sccoreq17v4 TYPE /nyx/sccoreq17v4.
+  DATA ls_sccoreq18v4 TYPE /nyx/sccoreq18v4.
+  DATA lt_sccoreq18v4 TYPE TABLE OF /nyx/sccoreq18v4.
+  DATA ls_sccoreq19v4 TYPE /nyx/sccoreq19v4.
+  DATA ls_t536c TYPE t536c.
+  DATA ls_addr1_sel TYPE addr1_sel.
+  DATA ls_address_data TYPE addr1_val.
+  DATA lv_msg1 TYPE char50.
+  DATA lv_msg2 TYPE char50.
 
+  FIELD-SYMBOLS <ls_result> TYPE /nyx/a1_sync_0700_alv.
+  FIELD-SYMBOLS <msg> TYPE bapiret2.
+  FIELD-SYMBOLS: <dest> TYPE /nyx/a1_dest_s.
 
-* Lösche Eintrag im IT0700 über FuBa
-TRY.
-    CLEAR: lv_success.
-    CALL METHOD /nyx/cl_a1_mgr=>check_dxa_overlap_do_action
+  lv_sender_mail = 'dienstreise.compliance@wacker.com'.
+
+********************************************************************************
+* Berechtigungsprüfung
+********************************************************************************
+  AUTHORITY-CHECK OBJECT '/NYX/AUTH'
+  ID 'ACTVT' FIELD '16'.
+  IF sy-subrc <> 0.
+    CALL FUNCTION 'BALW_BAPIRETURN_GET1'
       EXPORTING
-        is_request = ls_request
+        type       = 'E'
+        cl         = '/NYX/A1'
+        number     = '090'
       IMPORTING
-        ev_success = lv_success.
-  CATCH /nyx/cx_a1_exception .
-ENDTRY.
+        bapireturn = ls_bapiret1
+      EXCEPTIONS
+        OTHERS     = 1.
+    IF sy-subrc = 0.
+      CALL FUNCTION 'BALW_RET1_TO_RET2'
+        EXPORTING
+          return_in = ls_bapiret1
+        IMPORTING
+          return_ou = es_return.
+      IF sy-subrc = 0.
+        RETURN.
+      ELSE.
+        RETURN.
+      ENDIF.
+    ELSE.
+      RETURN.
+    ENDIF.
+  ENDIF.
 
-IF lv_success IS INITIAL.
+********************************************************************************
+* Data mapping
+********************************************************************************
+*  ls_request-ncid = iv_value01.
+*  ls_request- = iv_value02.
+*  ls_request- = iv_value03.
+*  ls_request- = iv_value04.
+*  ls_request- = iv_value05.
+*  ls_request- = iv_string01.
+*  ls_request- = iv_string02.
+*  ls_request- = iv_string03.
+*  ls_request- = iv_string04.
+*  ls_request- = iv_string05.
+
+  LOOP AT ct_kv01 INTO ls_kv.
+    CASE ls_kv-skey.
+      WHEN '@PERNR@'.
+        lv_pernr = ls_kv-svalue.
+
+        CLEAR: ls_kv_1.
+        ls_kv_1-skey = '@CENTRALID@'.
+        ls_kv_1-svalue = lv_pernr.
+        APPEND ls_kv_1 TO lt_key_value_param.
+
+        CLEAR: lt_personee.
+        CALL FUNCTION 'HR_PERSONEE_GETEMPLOYEE'
+          EXPORTING
+            iv_person_id      = lv_pernr
+            iv_with_authority = ''
+          IMPORTING
+            et_hrpersonee     = lt_personee.
+*           ET_EMPLOYEESINFO        =
+
+        IF sy-subrc = 0.
+          CLEAR: ls_personee.
+          LOOP AT lt_personee INTO ls_personee.
+*           check if company code is in Germany
+            CALL FUNCTION 'HR_READ_INFOTYPE_AUTHC_DISABLE'.
+            CALL FUNCTION 'HR_READ_INFOTYPE'
+              EXPORTING
+*               TCLAS     = 'A'
+                pernr     = ls_personee-employeeid
+                infty     = '0001'
+                begda     = sy-datum
+                endda     = sy-datum
+              TABLES
+                infty_tab = lt_p0001.
+            IF sy-subrc <> 0.
+* Implement suitable error handling here
+            ENDIF.
+            CLEAR: ls_p0001, ls_t001.
+            READ TABLE lt_p0001 INTO ls_p0001 INDEX 1.
+            SELECT SINGLE * FROM t001 INTO ls_t001 WHERE bukrs = ls_p0001-bukrs AND land1 = 'DE'.
+            IF sy-subrc <> 0.
+              CONTINUE.
+            ELSE.
+*              set pernr in request = SAP Pernr
+              ls_request-pernr = ls_personee-employeeid.
+*              set pernr in key value table = SAP Pernr
+              ls_kv-svalue = ls_personee-employeeid.
+              EXIT.
+            ENDIF.
+          ENDLOOP.
+        ENDIF.
+      WHEN '@A1MNR@'.
+        ls_request-a1mnr = ls_kv-svalue.
+      WHEN '@DOC_ID@'.
+        ls_request-doc_id = ls_kv-svalue.
+      WHEN '@SEGMENT_ID@'.
+        ls_request-segment_id = ls_kv-svalue.
+      WHEN '@TIME_STAMP@'.
+        lv_timestamp = ls_kv-svalue.
+      WHEN '@COUNTRY_CODE@'.
+        ls_request-countrycode = ls_kv-svalue.
+      WHEN '@STARTDATE@'.
+        lv_date_char = ls_kv-svalue.
+        CONCATENATE lv_date_char+0(4) lv_date_char+5(2) lv_date_char+8(2)
+          INTO lv_date.
+        ls_request-startdate = lv_date.
+      WHEN '@ENDDATE@'.
+        lv_date_char = ls_kv-svalue.
+        CONCATENATE lv_date_char+0(4) lv_date_char+5(2) lv_date_char+8(2)
+          INTO lv_date.
+        ls_request-enddate = lv_date.
+      WHEN '@CITY@'.
+        ls_request-ort_bs = ls_kv-svalue.
+      WHEN '@POSTCODE@'.
+        ls_request-plz_bs = ls_kv-svalue.
+      WHEN '@STREET@'.
+        ls_request-strasse_bs = ls_kv-svalue.
+      WHEN '@HOUSENUMBER@'.
+        ls_request-hausnr_bs = ls_kv-svalue.
+      WHEN '@MAILTYPE@'.
+        lv_mailtype = ls_kv-svalue.
+      WHEN '@SENDER_USRID@'.
+        lv_sender_usrid = ls_kv-svalue.
+      WHEN '@SENDER_USRID_ER@'.
+        lv_sender_erusrid = ls_kv-svalue.
+      WHEN '@RECIPIENT_MAIL@'.
+        lv_errecipient_mail = ls_kv-svalue.
+      WHEN '@MESSAGE@'.
+        ls_message-message = ls_kv-svalue.
+      WHEN OTHERS.
+    ENDCASE.
+    APPEND ls_kv TO lt_key_value_param.
+  ENDLOOP.
+
+*  LOOP AT ct_kv02 INTO ls_kv.
+*  ENDLOOP.
+*
+*  LOOP AT ct_kv03 INTO ls_kv.
+*  ENDLOOP.
+*
+*  LOOP AT ct_kv04 INTO ls_kv.
+*  ENDLOOP.
+*
+*  LOOP AT ct_kv05 INTO ls_kv.
+*  ENDLOOP.
+*
+*  LOOP AT ct_kv06 INTO ls_kv.
+*  ENDLOOP.
+*
+*  LOOP AT ct_kv07 INTO ls_kv.
+*  ENDLOOP.
+*
+*  LOOP AT ct_kv08 INTO ls_kv.
+*  ENDLOOP.
+*
+*  LOOP AT ct_kv09 INTO ls_kv.
+*  ENDLOOP.
+*
+*  LOOP AT ct_kv10 INTO ls_kv.
+*  ENDLOOP.
+
+  IF ls_request-segment_id IS INITIAL.
+*   ignore the expense with empty segment, go to next segment
+    RETURN.
+  ELSE.
+* Von hier vorläufig auskommentiert - 01.04.2026
+*    IF ls_request-countrycode IS INITIAL.
+*      CLEAR: ls_sccoreq19v4.
+*      SELECT SINGLE * FROM /nyx/sccoreq19v4 INTO CORRESPONDING FIELDS OF ls_sccoreq19v4
+*        WHERE
+*        doc_id = ls_request-doc_id AND
+*        segmentlegid = ls_request-segment_id AND
+*        customfieldname = 'CUSTOM1' AND     "Landx
+*        time_stamp = lv_timestamp.
+*      IF sy-subrc = 0.
+*        CLEAR: ls_t005t.
+*        SELECT SINGLE * FROM t005t INTO CORRESPONDING FIELDS OF ls_t005t
+*          WHERE landx = ls_sccoreq19v4-value.
+**      CLEAR: lt_sccoreq18v4, ls_sccoreq18v4.
+**      SELECT * FROM /nyx/sccoreq18v4 INTO TABLE lt_sccoreq18v4
+**        WHERE doc_id = ls_request-doc_id AND
+**          time_stamp = lv_timestamp.
+***     find the right segment id
+**      LOOP AT lt_sccoreq18v4 INTO ls_sccoreq18v4.
+**        SELECT SINGLE * FROM /nyx/sccoreq21v4 INTO CORRESPONDING FIELDS OF ls_sccoreq21v4
+**          WHERE doc_id = ls_sccoreq18v4-doc_id AND
+**          segmentlegid = ls_sccoreq18v4-segmentlegid AND
+**          startdate = ls_sccoreq18v4-startdate AND
+**          enddate = ls_sccoreq18v4-enddate AND
+**          time_stamp = lv_timestamp.
+*        IF sy-subrc = 0.
+*          ls_request-segment_id = ls_sccoreq19v4-segmentlegid.
+*          ls_request-countrycode = ls_t005t-land1.
+*        ELSE.
+**       ignore, go to next segment
+*          RETURN.
+*        ENDIF.
+*      ELSE.
+**     ignore, go to next segment
+*        RETURN.
+*      ENDIF.
+*    ENDIF.
+* Bis hier vorläufig auskommentiert - 01.04.2026
+  ENDIF.
+
+  " We only process requests with the expense type for A1
+  " To get the expense type of this request we first need its trip segment leg
+  SELECT SINGLE * FROM /nyx/sccoreq18v4 INTO CORRESPONDING FIELDS OF  ls_sccoreq18v4
+    WHERE
+      doc_id = ls_request-doc_id AND
+      segmentlegid = ls_request-segment_id AND
+      time_stamp = lv_timestamp.
+
+  IF ls_sccoreq18v4 IS INITIAL.
+    RETURN.
+  ELSE.
+    IF ls_sccoreq18v4-enddate IS NOT INITIAL.
+*     take  enddate of specific segment
+      ls_request-enddate = ls_sccoreq18v4-enddate.
+    ENDIF.
+  ENDIF.
+
+  " Get the Expenses Header Info, there the request type is saved
+  CLEAR: ls_sccoreq17v4.
+  SELECT SINGLE * FROM /nyx/sccoreq17v4 INTO ls_sccoreq17v4
+    WHERE
+      doc_id = ls_request-doc_id AND
+      expenseid = ls_sccoreq18v4-expenseid AND
+      time_stamp = lv_timestamp.
+
+  IF ls_sccoreq17v4-code <>'10003' AND " Travel to Wacker location
+     ls_sccoreq17v4-code <>'10002'. " Travel to customer
+    RETURN.
+  ENDIF.
+
+  " Assigne all custom fields
+  CLEAR: ls_sccoreq19v4.
+  SELECT * FROM /nyx/sccoreq19v4 INTO CORRESPONDING FIELDS OF ls_sccoreq19v4
+    WHERE
+       doc_id = ls_request-doc_id AND
+       segmentlegid = ls_request-segment_id AND
+       time_stamp = lv_timestamp.
+    CASE ls_sccoreq19v4-customfieldname.
+      WHEN 'CUSTOM2'.
+        ls_request-passport = ls_sccoreq19v4-value.
+      WHEN 'CUSTOM3'.
+        ls_request-name_bs = ls_sccoreq19v4-value.
+      WHEN 'CUSTOM4'.
+        ls_request-strasse_bs = ls_sccoreq19v4-value.
+      WHEN 'CUSTOM5'.
+        ls_request-hausnr_bs = ls_sccoreq19v4-value.
+      WHEN 'CUSTOM6'.
+        ls_request-plz_bs = ls_sccoreq19v4-value.
+      WHEN 'CUSTOM7'.
+        ls_request-ort_bs = ls_sccoreq19v4-value.
+      WHEN 'CUSTOM8'. "adresseschlüssel
+        CLEAR: ls_t536c, ls_addr1_sel, ls_address_data.
+        SELECT SINGLE * FROM t536c INTO ls_t536c WHERE molga = '01' AND
+                                                       anart = 'A1' AND
+                                                       ankey = ls_sccoreq19v4-code.
+        ls_addr1_sel-addrnumber =  ls_t536c-adrnr.
+        CALL FUNCTION 'ADDR_GET'
+          EXPORTING
+            address_selection = ls_addr1_sel
+          IMPORTING
+            address_value     = ls_address_data
+          EXCEPTIONS
+            parameter_error   = 1
+            address_not_exist = 2
+            version_not_exist = 3
+            internal_error    = 4
+            address_blocked   = 5
+            OTHERS            = 6.
+        IF sy-subrc = 0.
+          IF ls_address_data IS NOT INITIAL.
+            ls_request-name_bs = ls_address_data-name1.
+            ls_request-strasse_bs = ls_address_data-street.
+            ls_request-hausnr_bs = ls_address_data-house_num1.
+            ls_request-plz_bs = ls_address_data-post_code1.
+            ls_request-ort_bs = ls_address_data-city1.
+          ENDIF.
+        ENDIF.
+
+    ENDCASE.
+  ENDSELECT.
+
+********************************************************************************
+*Perform mandatory checks for A1 creation: Check Country's validity for A1
+********************************************************************************
+
+* Check country
+  SELECT SINGLE * FROM /nyx/a1_cctry INTO ls_cctry
+    WHERE
+      land = ls_request-countrycode AND                   "#EC CI_SUBRC
+      endda >= ls_request-enddate AND
+      begda <= ls_request-startdate.                    "#EC CI_NOFIRST
+
+  IF ls_cctry IS INITIAL OR
+     ls_request-countrycode IS INITIAL.
+
+    SELECT * FROM t005t INTO TABLE lt_t005t
+        WHERE
+          spras = sy-langu.                               "#EC CI_SUBRC
+    CLEAR ls_t005t.
+    READ TABLE lt_t005t
+      WITH KEY land1 = ls_request-countrycode
+      INTO ls_t005t.
+
+    CLEAR: lv_msg1,lv_msg2.
+    lv_msg1 =  ls_t005t-landx50.
+    lv_msg2 =  ls_request-doc_id.
+
+    CALL FUNCTION 'BALW_BAPIRETURN_GET1'
+      EXPORTING
+        type       = 'W'                   "Warning
+        cl         = '/NYX/A1'
+        number     = '021'
+        par1       = lv_msg1
+        par2       = lv_msg2
+      IMPORTING
+        bapireturn = ls_bapiret1
+      EXCEPTIONS
+        OTHERS     = 1.
+    IF sy-subrc = 0.
+      CALL FUNCTION 'BALW_RET1_TO_RET2'
+        EXPORTING
+          return_in = ls_bapiret1
+        IMPORTING
+          return_ou = es_return.
+      IF sy-subrc = 0.
+        RETURN.
+      ELSE.
+        RETURN.
+      ENDIF.
+    ELSE.
+      RETURN.
+    ENDIF.
+  ENDIF.
+
+********************************************************************************
+* Do action
+********************************************************************************
+
+* Check Overlapping
+  TRY.
+      CLEAR: lv_success.
+      CALL METHOD /nyx/cl_a1_mgr=>check_dxa_overlap_do_action
+        EXPORTING
+          is_request = ls_request
+        IMPORTING
+          ev_success = lv_success.
+    CATCH /nyx/cx_a1_exception .
+  ENDTRY.
+
+  IF lv_success IS INITIAL.
 * A1 bereits vorhanden - Änderung von bestehenden A1 mit überlappenem Zeitraum
 * Lösche Eintrag im A1-Manager über Delete Methods
-  SELECT SINGLE * FROM /nyx/a1_hdr INTO ls_hdr WHERE
-       land = ls_request-countrycode AND
-       cancelled <> 'X' AND
-      ( ( begda <= ls_request-startdate AND endda >= ls_request-startdate ) OR
-        ( begda <= ls_request-enddate AND endda >= ls_request-enddate ) ).
+    CLEAR: ls_hdr, ls_request_del.
+    SELECT SINGLE * FROM /nyx/a1_hdr INTO ls_hdr WHERE
+         land = ls_request-countrycode AND
+         cancelled <> 'X' AND
+        ( ( begda <= ls_request-startdate AND endda >= ls_request-startdate ) OR
+          ( begda <= ls_request-enddate AND endda >= ls_request-enddate ) ).
 
-  MOVE-CORRESPONDING  ls_hdr TO ls_request_del.
-  ls_request_del-startdate = ls_hdr-begda.
-  ls_request_del-enddate = ls_hdr-endda.
-  ls_request_del-countrycode = ls_hdr-land.
+    MOVE-CORRESPONDING  ls_hdr TO ls_request_del.
+    ls_request_del-startdate = ls_hdr-begda.
+    ls_request_del-enddate = ls_hdr-endda.
+    ls_request_del-countrycode = ls_hdr-land.
 
-  DATA: go_a1_notif TYPE REF TO /nyx/cl_a1_notif.
-  DATA: go_context TYPE REF TO /nyx/cl_a1_context.
-  DATA: gv_msg TYPE bapiret2.
-  DATA: gv_error TYPE char1.
-  CLEAR go_a1_notif.
-  go_context = /nyx/cl_a1_context=>get_instance( iv_refresh = abap_true ).
-  TRY.
+    DATA: go_a1_notif TYPE REF TO /nyx/cl_a1_notif.
+    DATA: go_context TYPE REF TO /nyx/cl_a1_context.
+    DATA: gv_msg TYPE bapiret2.
+    DATA: gv_error TYPE char1.
+    CLEAR go_a1_notif.
+    go_context = /nyx/cl_a1_context=>get_instance( iv_refresh = abap_true ).
+    TRY.
 *    go_a1_notif = /nyx/cl_a1_notif=>createfromdb( iv_pernr = ls_request-pernr iv_a1mnr = ls_request-a1mnr ).
-      go_a1_notif = /nyx/cl_a1_notif=>createfromdb( iv_pernr = ls_request_del-pernr iv_a1mnr = ls_request_del-a1mnr ).
-      go_a1_notif->deletefromdb( ).
-    CATCH /nyx/cx_a1_exception.
-      LOOP AT go_context->get_msg( ) INTO gv_msg.
-      ENDLOOP.
-      gv_error = 'X'.
-  ENDTRY.
-  IF gv_error IS NOT INITIAL.
+        go_a1_notif = /nyx/cl_a1_notif=>createfromdb( iv_pernr = ls_request_del-pernr iv_a1mnr = ls_request_del-a1mnr ).
+        go_a1_notif->deletefromdb( ).
+      CATCH /nyx/cx_a1_exception.
+        LOOP AT go_context->get_msg( ) INTO gv_msg.
+        ENDLOOP.
+        gv_error = 'X'.
+    ENDTRY.
+    IF gv_error IS NOT INITIAL.
 *   Suitable Error Message
-  ENDIF.
+    ENDIF.
 
 * Lösche Eintrag im IT0700 über FuBa
 *     P0700 schreiben
-  TRY.
-      /nyx/cl_a1_mgr=>sync_0700_dxa1(
-        EXPORTING
-          iv_pernr  = ls_request_del-pernr
-          iv_begda  = ls_request_del-startdate
-          iv_endda  = ls_request_del-enddate
-          iv_update = 'X'
-          iv_userfc = ''
-        IMPORTING
-          et_actions = lt_actions ).
-    CATCH /nyx/cx_a1_exception. " A1: Exception Klasse
+    TRY.
+        /nyx/cl_a1_mgr=>sync_0700_dxa1(
+          EXPORTING
+            iv_pernr  = ls_request_del-pernr
+            iv_begda  = ls_request_del-startdate
+            iv_endda  = ls_request_del-enddate
+            iv_update = 'X'
+            iv_userfc = ''
+          IMPORTING
+            et_actions = lt_actions ).
+      CATCH /nyx/cx_a1_exception. " A1: Exception Klasse
 *       Hmm... Eine Message ist im Context
-      LOOP AT go_context->get_msg( ) ASSIGNING <ls_msg>.
-        APPEND INITIAL LINE TO gt_result ASSIGNING <ls_result>.
-        MOVE-CORRESPONDING <ls_msg> TO <ls_result>.
-        <ls_result>-pernr = ls_request-pernr.
+        LOOP AT go_context->get_msg( ) ASSIGNING <msg>.
+          APPEND INITIAL LINE TO gt_result ASSIGNING <ls_result>.
+          MOVE-CORRESPONDING <msg> TO <ls_result>.
+          <ls_result>-pernr = ls_request-pernr.
 *        <ls_result>-ename = p0001-ename.
 *        <ls_result>-bukrs = p0001-bukrs.
-      ENDLOOP.
+        ENDLOOP.
 *       Eine weitere Bearbeitung der Actions macht keinen Sinn
-      EXIT.
-  ENDTRY.
-ELSE.
+        EXIT.
+    ENDTRY.
+  ELSE.
 * Änderung von bestehendem A1 ohne überlappenem Zeitraum / mit einem anderen Land / Hinzufügen von neuem A1 Segment
 *  man muss keine Löschung machen, sondern nur neuen A1 in /nyx/a1 hinzufügen.
-ENDIF.
+  ENDIF.
 
 * Erstelle neuen A1-Antrag im A1-Manager und SUBMIT
 * Submit A1
-CALL METHOD /nyx/cl_a1_mgr=>submit_from_concur_do_action
-  EXPORTING
-    is_request = ls_request
-  IMPORTING
-    ev_a1mnr   = lv_a1mnr
-    ev_success = lv_success.
+  IF ls_request-name_bs IS NOT INITIAL AND
+     ls_request-strasse_bs IS NOT INITIAL AND
+*     ls_request-hausnr_bs IS NOT INITIAL AND
+     ls_request-plz_bs IS NOT INITIAL AND
+     ls_request-ort_bs IS NOT INITIAL.
+    CALL METHOD /nyx/cl_a1_mgr=>submit_from_concur_do_action
+      EXPORTING
+        is_request = ls_request
+      IMPORTING
+        ev_a1mnr   = lv_a1mnr
+        ev_success = lv_success.
+
+*     Send Mail
+    /nyx/cl_a1_util=>send_mail(
+      EXPORTING
+        iv_pernr = ls_request-pernr
+        iv_a1mnr = lv_a1mnr
+        iv_mailtype = '064'
+        is_message = ls_message
+        it_attachments      = lt_attachment      "
+        iv_sender_uid       = lv_sender_usrid
+*             iv_recipient_uid    = recipient_uid    "
+*             iv_sender_mail      = sender_mail      "
+        iv_recipient_mail   = lv_recipient_mail
+*             it_recipients       = recipients
+        iv_send_immediately = 'X'             "
+        it_key_value_param       = lt_key_value_param
+      RECEIVING
+        ev_success          = lv_success
+    ).
+
+    IF lv_success IS INITIAL.
+* in case of errors , save as draft
+
+********************************************************************************
+* Do action
+*->A1 Creation
+*->Send Email if A1 creation is unsuccessful
+********************************************************************************
+*Proceed for A1 creation if the checks are successful
+* Create A1-Template
+      CALL METHOD /nyx/cl_a1_mgr=>save_from_concur_do_action
+        EXPORTING
+          is_request = ls_request
+        IMPORTING
+          ev_a1mnr   = lv_a1mnr
+          ev_success = lv_success.
+
+      IF lv_success IS INITIAL.
+        CALL FUNCTION 'BALW_BAPIRETURN_GET1'
+          EXPORTING
+            type       = 'E'
+            cl         = '/NYX/A1'
+            number     = '004'
+          IMPORTING
+            bapireturn = ls_bapiret1
+          EXCEPTIONS
+            OTHERS     = 1.
+        IF sy-subrc = 0.
+          CALL FUNCTION 'BALW_RET1_TO_RET2'
+            EXPORTING
+              return_in = ls_bapiret1
+            IMPORTING
+              return_ou = es_return.
+          IF sy-subrc = 0.
+            RETURN.
+          ELSE.
+            RETURN.
+          ENDIF.
+        ELSE.
+          RETURN.
+        ENDIF.
+      ENDIF.
+*      ENDIF.
+      ev_value01 = lv_a1mnr.
+      CLEAR: lt_t005t,
+             ls_t005t.
+
+      CLEAR ls_kv.
+      ls_kv-skey = '@A1MNR@'.
+      ls_kv-svalue = lv_a1mnr.
+      APPEND ls_kv TO lt_key_value_param.
+
+*     get key values
+      CALL METHOD /nyx/cl_a1_util=>get_key_values
+        EXPORTING
+          it_key_value_param = lt_key_value_param
+        IMPORTING
+          et_key_value_param = lt_key_value_param.
+
+* Send Mail
+      /nyx/cl_a1_util=>send_mail(
+        EXPORTING
+          iv_pernr = ls_request-pernr
+          iv_a1mnr = lv_a1mnr
+          iv_mailtype = lv_mailtype
+          is_message = ls_message
+*         it_attachments      = attachments      "
+          iv_sender_uid       = lv_sender_usrid
+*         iv_recipient_uid    = recipient_uid    "
+          iv_sender_mail      = lv_sender_mail
+          iv_recipient_mail   = lv_recipient_mail
+*         it_recipients       = recipients
+          iv_send_immediately = 'X'             "
+          it_key_value_param       = lt_key_value_param
+        RECEIVING
+          ev_success          = lv_success
+      ).
+
+      IF lv_success IS INITIAL.
+        CALL FUNCTION 'BALW_BAPIRETURN_GET1'
+          EXPORTING
+            type       = 'E'
+            cl         = '/NYX/A1'
+            number     = '135'
+          IMPORTING
+            bapireturn = ls_bapiret1
+          EXCEPTIONS
+            OTHERS     = 1.
+        IF sy-subrc = 0.
+          CALL FUNCTION 'BALW_RET1_TO_RET2'
+            EXPORTING
+              return_in = ls_bapiret1
+            IMPORTING
+              return_ou = es_return.
+          IF sy-subrc = 0.
+            RETURN.
+          ELSE.
+            RETURN.
+          ENDIF.
+        ELSE.
+          RETURN.
+        ENDIF.
+      ENDIF.
+
+    ELSE.
+*     submit successful, send mail with Request Form
+      ev_value01 = lv_a1mnr.
+
+* Read A1 header
+      TRY.
+          ls_hdr_s = /nyx/cl_a1_odata=>get_header( iv_pernr = ls_request-pernr iv_a1mnr = lv_a1mnr ).
+
+* Get the  preview if the status is SUBMITTED
+          IF ls_hdr_s-status = /nyx/cl_a1_util=>gc_status_approved_int.
+            CALL METHOD /nyx/cl_a1_odata=>get_pdf
+              EXPORTING
+                iv_pernr = ls_request-pernr
+                iv_a1mnr = lv_a1mnr
+              RECEIVING
+                rt_pdf   = lv_pdf_string.
+
+            IF lv_pdf_string IS NOT INITIAL.
+* Convert xstring to table
+              CLEAR: lt_binary, ls_attachment.
+              CALL FUNCTION 'SCMS_XSTRING_TO_BINARY'
+                EXPORTING
+                  buffer     = lv_pdf_string
+                TABLES
+                  binary_tab = lt_binary.
+
+              IF lt_binary IS NOT INITIAL.
+                ls_attachment-cont_hex = lt_binary.
+                ls_attachment-objtp = 'PDF'.
+                ls_attachment-subject = 'A1-Antrag'.
+                APPEND ls_attachment TO lt_attachment.
+              ENDIF.
+            ENDIF.
+          ENDIF.
+        CATCH /nyx/cx_a1_exception.
+          LOOP AT /nyx/cl_a1_context=>get_instance( )->get_msg( ) ASSIGNING <msg>.
+            es_return-message = <msg>-message.
+            RETURN.
+          ENDLOOP.
+
+      ENDTRY.
+
+*     Send Mail
+      /nyx/cl_a1_util=>send_mail(
+        EXPORTING
+          iv_pernr = ls_request-pernr
+          iv_a1mnr = lv_a1mnr
+          iv_mailtype = '064'   "mail type with formular
+          is_message = ls_message
+          it_attachments      = lt_attachment      "
+          iv_sender_uid       = lv_sender_usrid
+*             iv_recipient_uid    = recipient_uid    "
+          iv_sender_mail      = lv_sender_mail
+          iv_recipient_mail   = lv_recipient_mail
+*             it_recipients       = recipients
+          iv_send_immediately = 'X'             "
+          it_key_value_param       = lt_key_value_param
+        RECEIVING
+          ev_success          = lv_success
+      ).
+
+      IF lv_success IS INITIAL.
+        CALL FUNCTION 'BALW_BAPIRETURN_GET1'
+          EXPORTING
+            type       = 'E'
+            cl         = '/NYX/A1'
+            number     = '135'
+          IMPORTING
+            bapireturn = ls_bapiret1
+          EXCEPTIONS
+            OTHERS     = 1.
+        IF sy-subrc = 0.
+          CALL FUNCTION 'BALW_RET1_TO_RET2'
+            EXPORTING
+              return_in = ls_bapiret1
+            IMPORTING
+              return_ou = es_return.
+          IF sy-subrc = 0.
+            RETURN.
+          ELSE.
+            RETURN.
+          ENDIF.
+        ELSE.
+          RETURN.
+        ENDIF.
+      ENDIF.
+    ENDIF.
+  ELSE.
+* Address not available, try to save A1 as draft and send email
+********************************************************************************
+* Do action
+*->A1 Creation
+*->Send Email if A1 creation is successful
+********************************************************************************
+*Proceed for A1 creation if the checks are successful
+* Create A1-Template
+    CALL METHOD /nyx/cl_a1_mgr=>save_from_concur_do_action
+      EXPORTING
+        is_request = ls_request
+      IMPORTING
+        ev_a1mnr   = lv_a1mnr
+        ev_success = lv_success.
+
+
+    IF lv_success IS INITIAL.
+      CALL FUNCTION 'BALW_BAPIRETURN_GET1'
+        EXPORTING
+          type       = 'E'
+          cl         = '/NYX/A1'
+          number     = '004'
+        IMPORTING
+          bapireturn = ls_bapiret1
+        EXCEPTIONS
+          OTHERS     = 1.
+      IF sy-subrc = 0.
+        CALL FUNCTION 'BALW_RET1_TO_RET2'
+          EXPORTING
+            return_in = ls_bapiret1
+          IMPORTING
+            return_ou = es_return.
+        IF sy-subrc = 0.
+          RETURN.
+        ELSE.
+          RETURN.
+        ENDIF.
+      ELSE.
+        RETURN.
+      ENDIF.
+    ENDIF.
+*  ENDIF.
+    ev_value01 = lv_a1mnr.
+    CLEAR: lt_t005t,
+           ls_t005t.
+
+    CLEAR ls_kv.
+    ls_kv-skey = '@A1MNR@'.
+    ls_kv-svalue = lv_a1mnr.
+    APPEND ls_kv TO lt_key_value_param.
+
+* get key values
+    CALL METHOD /nyx/cl_a1_util=>get_key_values
+      EXPORTING
+        it_key_value_param = lt_key_value_param
+      IMPORTING
+        et_key_value_param = lt_key_value_param.
+
+* Send Mail
+    /nyx/cl_a1_util=>send_mail(
+      EXPORTING
+        iv_pernr = ls_request-pernr
+        iv_a1mnr = lv_a1mnr
+        iv_mailtype = lv_mailtype
+        is_message = ls_message
+*         it_attachments      = attachments      "
+        iv_sender_uid       = lv_sender_usrid
+*         iv_recipient_uid    = recipient_uid    "
+        iv_sender_mail      = lv_sender_mail
+        iv_recipient_mail   = lv_recipient_mail
+*         it_recipients       = recipients
+        iv_send_immediately = 'X'             "
+        it_key_value_param       = lt_key_value_param
+      RECEIVING
+        ev_success          = lv_success
+    ).
+
+    IF lv_success IS INITIAL.
+      CALL FUNCTION 'BALW_BAPIRETURN_GET1'
+        EXPORTING
+          type       = 'E'
+          cl         = '/NYX/A1'
+          number     = '135'
+        IMPORTING
+          bapireturn = ls_bapiret1
+        EXCEPTIONS
+          OTHERS     = 1.
+      IF sy-subrc = 0.
+        CALL FUNCTION 'BALW_RET1_TO_RET2'
+          EXPORTING
+            return_in = ls_bapiret1
+          IMPORTING
+            return_ou = es_return.
+        IF sy-subrc = 0.
+          RETURN.
+        ELSE.
+          RETURN.
+        ENDIF.
+      ELSE.
+        RETURN.
+      ENDIF.
+    ENDIF.
+  ENDIF.
+
+*  ev_value02 = .
+*  ev_value03 = .
+*  ev_value04 = .
+*  ev_value05 = .
+
+ENDFUNCTION.
