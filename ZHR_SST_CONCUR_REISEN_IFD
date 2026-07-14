@@ -41,7 +41,8 @@ SELECTION-SCREEN END OF BLOCK a1.
 SELECTION-SCREEN BEGIN OF BLOCK a2 WITH FRAME TITLE TEXT-002.
 PARAMETERS p_filen TYPE text256 OBLIGATORY DEFAULT 'SST_Deloitte.csv'.
 PARAMETERS p_as TYPE char1 RADIOBUTTON GROUP rbg1 USER-COMMAND us DEFAULT 'X'.
-PARAMETERS p_asp TYPE text256 OBLIGATORY DEFAULT 'C:\temp' MODIF ID 001.
+PARAMETERS p_asp TYPE ys_ftpfile. " YSTRANSP-LFILENAME, OBLIGATORY DEFAULT 'C:\temp' MODIF ID 001.
+PARAMETERS p_modul  TYPE ys_modulnm DEFAULT 'HR-SF' MODIF ID 001. " YSTRANSP-MODULNAME
 PARAMETERS p_lm TYPE char1 RADIOBUTTON GROUP rbg1 .
 PARAMETERS p_lmp TYPE string DEFAULT 'C:\' MODIF ID 002 ."Source file name
 PARAMETERS p_seprat TYPE char1 DEFAULT ','.
@@ -59,6 +60,9 @@ INITIALIZATION.
   IF sy-subrc NE 0.
     MESSAGE e059(eu) WITH 'ZHR_A1_CSV'.  " no authority
   ENDIF.
+
+  CONCATENATE 'SST_Deloitte_' sy-datum '.csv' INTO p_filen.
+  CONCATENATE '/' sy-sysid '_R3WRITE/hr-sf/' p_filen INTO p_asp.
 
 AT SELECTION-SCREEN OUTPUT .
   LOOP AT SCREEN.
@@ -101,18 +105,6 @@ AT SELECTION-SCREEN ON VALUE-REQUEST FOR p_lmp.
 
   ENDTRY.
 
-
-AT SELECTION-SCREEN ON VALUE-REQUEST FOR p_asp.
-  CALL FUNCTION '/SAPDMC/LSM_F4_SERVER_FILE'
-    IMPORTING
-      serverfile       = p_asp
-    EXCEPTIONS
-      canceled_by_user = 1
-      OTHERS           = 2.
-
-  IF sy-subrc <> 0.
-    MESSAGE ID 'ZHR_SST_CONCUR_MC' TYPE 'E' NUMBER 003.
-  ENDIF.
 * --- START of SELECTION -----------------------------------------------
 START-OF-SELECTION.
 * Create a new object
@@ -240,6 +232,7 @@ FORM process_data .
   DATA: ls_dest_list TYPE /nyx/sccoreq21v4.
   DATA: ls_log TYPE zhrsst_a1_2.
   DATA: ls_pa0001 TYPE pa0001.
+  DATA: lv_trip_id TYPE /nyx/sc_co_req_legid_v04.
 
   CLEAR: gt_aus_d.
   LOOP AT gt_a1_hdr INTO ls_a1_hdr.
@@ -298,39 +291,35 @@ FORM process_data .
       ls_aus_d-times = ls_a1_hist-time_from.
     ENDIF.
 
-    MOVE-CORRESPONDING EXACT ls_aus_d TO ls_log.
-    ls_log-a1mnr = ls_a1_hdr-a1mnr.
-    ls_log-vp_date = ls_a1_hist-date_from.
-    ls_log-vp_time = ls_a1_hist-time_from.
-
 * Read destinations
     SELECT * FROM /nyx/a1_dest INTO TABLE lt_a1_dest WHERE pernr = ls_a1_hdr-pernr AND a1mnr = ls_a1_hdr-a1mnr.
     IF sy-subrc = 0.
       SORT lt_a1_dest BY bsnr ASCENDING.
+      lv_trip_id = ls_aus_d-trip_id.
       LOOP AT lt_a1_dest INTO ls_a1_dest.
         CASE sy-tabix.
           WHEN 1.
-            CONCATENATE ls_aus_d-trip_id '1ST' INTO ls_aus_d-trip_id.
+            CONCATENATE lv_trip_id '1ST' INTO ls_aus_d-trip_id.
           WHEN 2.
-            CONCATENATE ls_aus_d-trip_id '2ND' INTO ls_aus_d-trip_id.
+            CONCATENATE lv_trip_id '2ND' INTO ls_aus_d-trip_id.
           WHEN 3.
-            CONCATENATE ls_aus_d-trip_id '3RD' INTO ls_aus_d-trip_id.
+            CONCATENATE lv_trip_id '3RD' INTO ls_aus_d-trip_id.
           WHEN 4.
-            CONCATENATE ls_aus_d-trip_id '4TH' INTO ls_aus_d-trip_id.
+            CONCATENATE lv_trip_id '4TH' INTO ls_aus_d-trip_id.
           WHEN 5.
-            CONCATENATE ls_aus_d-trip_id '5TH' INTO ls_aus_d-trip_id.
+            CONCATENATE lv_trip_id '5TH' INTO ls_aus_d-trip_id.
           WHEN 6.
-            CONCATENATE ls_aus_d-trip_id '6TH' INTO ls_aus_d-trip_id.
+            CONCATENATE lv_trip_id '6TH' INTO ls_aus_d-trip_id.
           WHEN 7.
-            CONCATENATE ls_aus_d-trip_id '7TH' INTO ls_aus_d-trip_id.
+            CONCATENATE lv_trip_id '7TH' INTO ls_aus_d-trip_id.
           WHEN 8.
-            CONCATENATE ls_aus_d-trip_id '8TH' INTO ls_aus_d-trip_id.
+            CONCATENATE lv_trip_id '8TH' INTO ls_aus_d-trip_id.
           WHEN 9.
-            CONCATENATE ls_aus_d-trip_id '9TH' INTO ls_aus_d-trip_id.
+            CONCATENATE lv_trip_id '9TH' INTO ls_aus_d-trip_id.
           WHEN 10.
-            CONCATENATE ls_aus_d-trip_id '10TH' INTO ls_aus_d-trip_id.
+            CONCATENATE lv_trip_id '10TH' INTO ls_aus_d-trip_id.
           WHEN 11.
-            CONCATENATE ls_aus_d-trip_id '11TH' INTO ls_aus_d-trip_id.
+            CONCATENATE lv_trip_id '11TH' INTO ls_aus_d-trip_id.
           WHEN OTHERS.
         ENDCASE.
         ls_aus_d-ankey = ls_a1_dest-t536c_key_bs.
@@ -351,6 +340,7 @@ FORM process_data .
         SELECT SINGLE * FROM /nyx/a1_hist INTO ls_a1_hist_delete WHERE pernr = ls_aus_d-pernr AND a1mnr = ls_a1_hdr-a1mnr AND status = 'DELETED'.
         IF sy-subrc = 0.
           ls_aus_d-tw_status = 'CANCEL'.
+
           MOVE-CORRESPONDING EXACT ls_aus_d TO ls_log.
           ls_log-a1mnr = ls_a1_hdr-a1mnr.
           ls_log-vp_date = ls_a1_hist_delete-date_from.
@@ -366,7 +356,12 @@ FORM process_data .
         SELECT SINGLE * FROM zhrsst_a1_2 INTO ls_log WHERE trip_id = ls_aus_d-trip_id AND a1mnr = ls_a1_hdr-a1mnr AND tw_status = 'CREATE'.
         IF sy-subrc <> 0.
 
-          ls_aus_d-tw_status = 'CREATE'.
+          ls_aus_d-tw_status = 'APPROVED'.
+
+          MOVE-CORRESPONDING EXACT ls_aus_d TO ls_log.
+          ls_log-a1mnr = ls_a1_hdr-a1mnr.
+          ls_log-vp_date = ls_a1_hist-date_from.
+          ls_log-vp_time = ls_a1_hist-time_from.
           ls_log-vp_action = 'CREATE'.
 
           APPEND ls_log TO gt_log.
@@ -379,6 +374,11 @@ FORM process_data .
             OR ls_log-hausn NE ls_aus_d-hausn OR ls_log-plz NE ls_aus_d-plz OR ls_log-ort NE ls_aus_d-ort.
 
             ls_aus_d-tw_status = 'APPROVED'.
+
+            MOVE-CORRESPONDING EXACT ls_aus_d TO ls_log.
+            ls_log-a1mnr = ls_a1_hdr-a1mnr.
+            ls_log-vp_date = ls_a1_hist-date_from.
+            ls_log-vp_time = ls_a1_hist-time_from.
             ls_log-vp_action = 'CHANGE'.
 
             APPEND ls_log TO gt_log.
@@ -386,11 +386,8 @@ FORM process_data .
             CONTINUE.
           ENDIF.
         ENDIF.
-
-        APPEND ls_aus_d TO gt_aus_d.
       ENDLOOP.
 
-      CONTINUE.           " Go to the next a1 header
     ELSE.
 * No destinations available
       CONCATENATE ls_aus_d-trip_id '1ST' INTO ls_aus_d-trip_id.
@@ -406,6 +403,11 @@ FORM process_data .
       SELECT SINGLE * FROM /nyx/a1_hist INTO ls_a1_hist_delete WHERE pernr = ls_aus_d-pernr AND a1mnr = ls_a1_hdr-a1mnr AND status = 'DELETED'.
       IF sy-subrc = 0.
         ls_aus_d-tw_status = 'CANCEL'.
+
+        MOVE-CORRESPONDING EXACT ls_aus_d TO ls_log.
+        ls_log-a1mnr = ls_a1_hdr-a1mnr.
+        ls_log-vp_date = ls_a1_hist_delete-date_from.
+        ls_log-vp_time = ls_a1_hist_delete-time_from.
         ls_log-vp_action = 'DELETE'.
 
         APPEND ls_log TO gt_log.
@@ -416,7 +418,12 @@ FORM process_data .
 * If no entry exists at all => create
       SELECT SINGLE * FROM zhrsst_a1_2 INTO ls_log WHERE trip_id = ls_aus_d-trip_id AND a1mnr = ls_a1_hdr-a1mnr AND tw_status = 'CREATE'.
       IF sy-subrc <> 0.
-        ls_aus_d-tw_status = 'CREATE'.
+        ls_aus_d-tw_status = 'APPROVED'.
+
+        MOVE-CORRESPONDING EXACT ls_aus_d TO ls_log.
+        ls_log-a1mnr = ls_a1_hdr-a1mnr.
+        ls_log-vp_date = ls_a1_hist-date_from.
+        ls_log-vp_time = ls_a1_hist-time_from.
         ls_log-vp_action = 'CREATE'.
 
         APPEND ls_log TO gt_log.
@@ -429,6 +436,11 @@ FORM process_data .
           OR ls_log-hausn NE ls_aus_d-hausn OR ls_log-plz NE ls_aus_d-plz OR ls_log-ort NE ls_aus_d-ort.
 
           ls_aus_d-tw_status = 'APPROVED'.
+
+          MOVE-CORRESPONDING EXACT ls_aus_d TO ls_log.
+          ls_log-a1mnr = ls_a1_hdr-a1mnr.
+          ls_log-vp_date = ls_a1_hist-date_from.
+          ls_log-vp_time = ls_a1_hist-time_from.
           ls_log-vp_action = 'CHANGE'.
 
           APPEND ls_log TO gt_log.
@@ -506,7 +518,7 @@ FORM download_csv .
     IF p_lm IS NOT INITIAL.                       " Download to local machine
       PERFORM download_csv_lm.
     ELSE.                                         " Save to AL11
-      PERFORM save_to_as.
+      PERFORM write_data_ftp.
     ENDIF.
   ELSE.                 " test mode
     PERFORM print_output.
@@ -557,19 +569,19 @@ ENDFORM.
 *&---------------------------------------------------------------------*
 *       Save the csv file to application server in AL11
 *----------------------------------------------------------------------*
-FORM save_to_as .
-  DATA: ls_csv LIKE LINE OF gt_csv_table.
-
-  OPEN DATASET gv_filepath FOR OUTPUT IN TEXT MODE ENCODING UTF-8 WITH WINDOWS LINEFEED.
-  IF sy-subrc <> 0.
-    MESSAGE ID 'ZHR_SST_CONCUR_MC' TYPE 'E' NUMBER 002.
-  ENDIF.
-  LOOP AT gt_csv_table INTO ls_csv.
-    TRANSFER ls_csv TO gv_filepath.
-  ENDLOOP.
-
-  CLOSE DATASET gv_filepath.
-ENDFORM.
+*FORM save_to_as .
+*  DATA: ls_csv LIKE LINE OF gt_csv_table.
+*
+*  OPEN DATASET gv_filepath FOR OUTPUT IN TEXT MODE ENCODING UTF-8 WITH WINDOWS LINEFEED.
+*  IF sy-subrc <> 0.
+*    MESSAGE ID 'ZHR_SST_CONCUR_MC' TYPE 'E' NUMBER 002.
+*  ENDIF.
+*  LOOP AT gt_csv_table INTO ls_csv.
+*    TRANSFER ls_csv TO gv_filepath.
+*  ENDLOOP.
+*
+*  CLOSE DATASET gv_filepath.
+*ENDFORM.
 *&---------------------------------------------------------------------*
 *&      Form  SAVE_DATA
 *&---------------------------------------------------------------------*
@@ -589,5 +601,86 @@ FORM save_data .
         WRITE:/ lv_message.
       ENDIF.
     ENDLOOP.
+  ENDIF.
+ENDFORM.
+
+*&---------------------------------------------------------------------*
+*&      Form  WRITE_DATA_FTP
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM write_data_ftp .
+
+  DATA: dsn      TYPE fileextern,
+        msg(128),
+        r_file   TYPE ys_ftpfile. "YSTRANSP-RFILENAME. "
+
+  DATA: rf_descr TYPE REF TO cl_abap_structdescr,
+        rf_conv  TYPE REF TO cl_simple_csv_converter.
+  DATA: lt_comp TYPE abap_compdescr_tab,
+        ls_comp TYPE LINE OF abap_compdescr_tab.
+  DATA: lv_names TYPE string.
+  DATA: lv_path TYPE ys_ftpfile. "YS_FTPFILE.
+  DATA: ls_csv LIKE LINE OF gt_csv_table.
+  DATA: lv_filep TYPE ys_ftpfile.
+
+
+  CONCATENATE 'SST_Deloitte_' sy-datum '.csv' INTO p_filen.
+  CONCATENATE '' p_filen INTO lv_filep.
+  CONCATENATE '/' sy-sysid '_R3WRITE/hr-sf/' p_filen INTO p_asp.
+
+  dsn = p_asp.
+
+  " IF p_edi = abap_true.   "Employee directory interface
+
+  " Dataset öffnen
+  OPEN DATASET dsn FOR OUTPUT IN TEXT MODE ENCODING DEFAULT
+    MESSAGE msg.
+  IF sy-subrc = 0.
+    LOOP AT gt_csv_table INTO ls_csv.
+      TRANSFER ls_csv TO dsn.
+    ENDLOOP.
+
+    CLOSE DATASET dsn.
+  ELSE.
+    MESSAGE e001(ys) WITH msg.
+  ENDIF.
+
+  r_file = p_filen. "Remotefile-Name
+
+  IF sy-sysid = 'WE5' OR sy-sysid = 'WK5'.
+    "lv_path = '/ftphrsf/Test_Deloitte'.
+    lv_path = 'Test_Deloitte'.
+  ELSEIF sy-sysid = 'WP5'.
+    "lv_path = '/ftphrsf/Prod_Deloitte'.
+    lv_path = 'Prod_Deloitte'.
+  ENDIF.
+
+* FTP Transfer
+  CALL FUNCTION 'Y_S_TRANS'
+    EXPORTING
+      modul                   = p_modul
+      rfile                   = r_file "Name File auf FTP
+      lfile                   = lv_filep "p_filef "Pfad und Name auf r3write
+      rpath                   = lv_path "'/ftphrqtx/' "Pfad auf FTP Server
+      ftpmode                 = 'P' "Transfer nach FTP Server
+*     ASCII                   =
+    EXCEPTIONS
+      wrong_ftp_mode          = 1
+      no_authority            = 2
+      no_authority_c_function = 3
+      module_not_found        = 4
+      lpath_not_found         = 5
+      logon_error             = 6
+      rpath_file_not_found    = 7
+      rhost_not_reached       = 8
+      other_errors            = 9
+      OTHERS                  = 10.
+  IF sy-subrc <> 0.
+    MESSAGE ID sy-msgid TYPE sy-msgty NUMBER sy-msgno
+            WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4.
   ENDIF.
 ENDFORM.
