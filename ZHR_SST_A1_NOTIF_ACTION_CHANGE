@@ -44,6 +44,8 @@ FUNCTION zhr_sst_a1_notif_action_change.
   DATA ls_kv TYPE /nyx/a1_key_val_param_s.
   DATA ls_kv_1 TYPE /nyx/a1_key_val_param_s.
   DATA lv_a1mnr TYPE /nyx/a1_mnr.
+  DATA lv_a1mnr_old TYPE /nyx/a1_mnr.
+  DATA lv_a1mnr_new TYPE /nyx/a1_mnr.
   DATA lt_key_value_param TYPE /nyx/a1_key_value_param_tt.
   DATA lv_sender_erusrid TYPE usrid.
   DATA lv_sender_usrid TYPE usrid.
@@ -62,8 +64,10 @@ FUNCTION zhr_sst_a1_notif_action_change.
   DATA ls_p0001 TYPE p0001.
   DATA ls_t001 TYPE t001.
   DATA ls_hdr TYPE /nyx/a1_hdr.
+  DATA lt_hdr TYPE TABLE OF /nyx/a1_hdr.
+  DATA lt_hdr_tt TYPE /nyx/a1_hdr_tt.
+  DATA lt_hist TYPE TABLE OF /nyx/a1_hist.
   DATA ls_hdr_s TYPE /nyx/a1_hdr_s.
-  DATA lt_hdr TYPE /nyx/a1_hdr_tt.
   DATA ls_clusterdata TYPE /nyx/a1_data_s.
   DATA lv_bsnr TYPE /nyx/a1_anr.
   DATA ls_dest TYPE /nyx/a1_dest_s.
@@ -81,6 +85,7 @@ FUNCTION zhr_sst_a1_notif_action_change.
   DATA lt_sccoreq18v4 TYPE TABLE OF /nyx/sccoreq18v4.
   DATA ls_sccoreq19v4 TYPE /nyx/sccoreq19v4.
   DATA ls_sccoreq21v4 TYPE /nyx/sccoreq21v4.
+  DATA ls_sccoreq22v4 TYPE /nyx/sccoreq22v4.
   DATA ls_t536c TYPE t536c.
   DATA ls_addr1_sel TYPE addr1_sel.
   DATA ls_address_data TYPE addr1_val.
@@ -91,10 +96,13 @@ FUNCTION zhr_sst_a1_notif_action_change.
   DATA gv_msg TYPE bapiret2.
   DATA gv_error TYPE char1.
   DATA lv_del TYPE wdy_boolean.
+  DATA lv_docsegment_id TYPE string.
+  DATA gs_hrsst_a1_3 TYPE zhrsst_a1_3.
 
   FIELD-SYMBOLS <ls_result> TYPE /nyx/a1_sync_0700_alv.
   FIELD-SYMBOLS <msg> TYPE bapiret2.
   FIELD-SYMBOLS: <dest> TYPE /nyx/a1_dest_s.
+  FIELD-SYMBOLS: <fs_kv> TYPE /nyx/a1_key_val_param_s..
 
   lv_sender_mail = 'dienstreise.compliance@wacker.com'.
 
@@ -225,7 +233,6 @@ FUNCTION zhr_sst_a1_notif_action_change.
     APPEND ls_kv TO lt_key_value_param.
   ENDLOOP.
 
-
   IF ls_request-segment_id IS INITIAL.
 *   ignore the expense with empty segment, go to next segment
     RETURN.
@@ -245,6 +252,11 @@ FUNCTION zhr_sst_a1_notif_action_change.
   ELSE.
     IF ls_sccoreq18v4-enddate IS NOT INITIAL.
 *     take  enddate of specific segment
+      READ TABLE lt_key_value_param ASSIGNING <fs_kv> WITH KEY skey = '@ENDDATE@'.
+      IF <fs_kv> IS ASSIGNED.
+        <fs_kv>-svalue = ls_sccoreq18v4-enddate.
+      ENDIF.
+      REPLACE ALL OCCURRENCES OF SUBSTRING '-' IN ls_sccoreq18v4-enddate WITH ''.
       ls_request-enddate = ls_sccoreq18v4-enddate.
     ENDIF.
   ENDIF.
@@ -302,11 +314,15 @@ FUNCTION zhr_sst_a1_notif_action_change.
             OTHERS            = 6.
         IF sy-subrc = 0.
           IF ls_address_data IS NOT INITIAL.
-            ls_request-name_bs = ls_address_data-name1.
-            ls_request-strasse_bs = ls_address_data-street.
-            ls_request-hausnr_bs = ls_address_data-house_num1.
-            ls_request-plz_bs = ls_address_data-post_code1.
-            ls_request-ort_bs = ls_address_data-city1.
+            IF ls_request-countrycode <> ls_address_data-country.
+              CLEAR: ls_request-name_bs, ls_request-strasse_bs, ls_request-hausnr_bs, ls_request-plz_bs, ls_request-ort_bs.
+            ELSE.
+              ls_request-name_bs = ls_address_data-name1.
+              ls_request-strasse_bs = ls_address_data-street.
+              ls_request-hausnr_bs = ls_address_data-house_num1.
+              ls_request-plz_bs = ls_address_data-post_code1.
+              ls_request-ort_bs = ls_address_data-city1.
+            ENDIF.
           ENDIF.
         ENDIF.
     ENDCASE.
@@ -372,6 +388,15 @@ FUNCTION zhr_sst_a1_notif_action_change.
 *Else, save A1 draft and send mail
 ********************************************************************************
 
+* Finde die für dieses Segment erstellte A1 Nr.
+  CLEAR: ls_sccoreq21v4.
+  SELECT SINGLE * FROM /nyx/sccoreq21v4 INTO CORRESPONDING FIELDS OF ls_sccoreq21v4
+    WHERE
+      doc_id = ls_request-doc_id AND
+      segmentlegid = ls_request-segment_id AND
+      proc_value <> '' AND
+      time_stamp = lv_timestamp.
+
 * Check Overlapping
   TRY.
       CLEAR: lv_success, lv_del.
@@ -384,14 +409,19 @@ FUNCTION zhr_sst_a1_notif_action_change.
   ENDTRY.
 
   IF lv_success IS INITIAL.
+    IF ls_sccoreq21v4 IS NOT INITIAL.
+      CLEAR: lv_docsegment_id.
+      CONCATENATE ls_sccoreq21v4-doc_id ls_sccoreq21v4-segmentlegid INTO lv_docsegment_id.
 * A1 bereits vorhanden - Änderung von bestehenden A1 mit überlappenem Zeitraum
 * Löschung von alter A1
-    lv_del = 'X'.
+      lv_del = 'X'.
+    ENDIF.
+* Neues Segment hinzugefügt mit überlappenem Zeitraum -> keine Löschung, erstelle Draft
   ELSE.
 * Keine Überlappung -> Änderung von bestehendem A1 ohne überlappenem Zeitraum / mit einem anderen Land / Hinzufügen von neuem A1 Segment
 
-* Fallsunterscheidung:
-* 1. Handelt es sich um eine Änderung in bestehendem Segment, aber mit neuem nicht überlappendem Zeiraum?
+* Fallsunterscheidung für nicht überlappenen Zeitraum:
+* 1. Handelt es sich um eine Änderung in bestehendem Segment, aber mit neuem Zeiraum und dasselbe Land?
 *    -> Löschung von alter A1
 * 2. Handelt es sich um eine Änderung in bestehendem Segment, aber mit neuem Land?
 *    -> Löschung von alter A1
@@ -399,27 +429,21 @@ FUNCTION zhr_sst_a1_notif_action_change.
 *    -> passt so, nichts löschen
 * 4. Handelt es sich um ein Löschung bestehendes Segments?
 *    -> Löschung von alter A1
+* 5. Handelt es sich um ein andere neue Änderung von anderem Segment, aber mit neuem Zeiraum und dasselbe Land?
+*    -> Nicht löschen des neuen anderen Segment, Löschung von diesem alten Segment, Änderung mit diesem Segment mergen
 
 * wir versuchen Fall 1, 2, 4 zu finden.
 
-* Finde die für dieses Segment erstellte A1 Nr.
-    CLEAR: ls_sccoreq21v4.
-    SELECT SINGLE * FROM /nyx/sccoreq21v4 INTO CORRESPONDING FIELDS OF ls_sccoreq21v4
-      WHERE
-        doc_id = ls_request-doc_id AND
-        segmentlegid = ls_request-segment_id AND
-        proc_value <> '' AND
-        time_stamp = lv_timestamp.
-    IF sy-subrc = 0.
+    IF ls_sccoreq21v4 IS NOT INITIAL.
       CLEAR: ls_hdr.
       SELECT SINGLE * FROM /nyx/a1_hdr INTO ls_hdr WHERE
            a1mnr = ls_sccoreq21v4-proc_value.
-      IF ls_hdr-land <> ls_request-countrycode OR   "Fall 2
+      IF ls_hdr IS NOT INITIAL AND ( ls_hdr-land <> ls_request-countrycode OR   "Fall 2
          ls_request-enddate <  ls_hdr-begda OR      "Fall 1
-         ls_request-startdate >  ls_hdr-endda.      "Fall 1
+         ls_request-startdate >  ls_hdr-endda ).      "Fall 1
         lv_del = 'X'.
       ELSE.
-        SELECT SINGLE * FROM /nyx/sccoreq22v4 INTO CORRESPONDING FIELDS OF ls_sccoreq21v4
+        SELECT SINGLE * FROM /nyx/sccoreq22v4 INTO CORRESPONDING FIELDS OF ls_sccoreq22v4
           WHERE
             doc_id = ls_request-doc_id AND
             segmentlegid = ls_request-segment_id AND
@@ -436,93 +460,261 @@ FUNCTION zhr_sst_a1_notif_action_change.
 
   IF lv_del = 'X'.
 *  Lösche Eintrag im A1-Manager über Delete Methods
-    CLEAR: ls_hdr, ls_request_del.
-    SELECT SINGLE * FROM /nyx/a1_hdr INTO ls_hdr WHERE
+    CLEAR: ls_hdr, ls_request_del, lt_hdr.
+*    SELECT SINGLE * FROM /nyx/a1_hdr INTO ls_hdr WHERE
+*         land = ls_request-countrycode AND
+*         cancelled <> 'X' AND
+*        ( ( begda <= ls_request-startdate AND endda >= ls_request-startdate ) OR
+*          ( begda <= ls_request-enddate AND endda >= ls_request-enddate ) ).
+
+*    finde alle A1 Anträge die innerhalb neuem Zeitraum sind
+    SELECT * FROM /nyx/a1_hdr INTO TABLE lt_hdr WHERE
          land = ls_request-countrycode AND
          cancelled <> 'X' AND
-        ( ( begda <= ls_request-startdate AND endda >= ls_request-startdate ) OR
-          ( begda <= ls_request-enddate AND endda >= ls_request-enddate ) ).
+        ( ( begda >= ls_request-startdate AND begda <= ls_request-enddate ) OR
+          ( endda >= ls_request-startdate AND endda <= ls_request-enddate ) ).
 
-    MOVE-CORRESPONDING  ls_hdr TO ls_request_del.
-    ls_request_del-startdate = ls_hdr-begda.
-    ls_request_del-enddate = ls_hdr-endda.
-    ls_request_del-countrycode = ls_hdr-land.
-    CLEAR go_a1_notif.
-    go_context = /nyx/cl_a1_context=>get_instance( iv_refresh = abap_true ).
+    IF lt_hdr IS INITIAL.
+      SELECT * FROM /nyx/a1_hdr INTO TABLE lt_hdr WHERE
+           land = ls_request-countrycode AND
+           cancelled <> 'X' AND
+           a1mnr = ls_sccoreq21v4-proc_value.
+    ENDIF.
+
+    IF sy-subrc = 0.
+      CLEAR:  ls_hdr.
+      LOOP AT lt_hdr INTO ls_hdr.
+*        need to decide that this A1 is old or new
+        IF ls_hdr-a1mnr = ls_sccoreq21v4-proc_value.
+*          ok, can be deleted
+        ELSE.
+          CLEAR: lt_hist.
+          SELECT * FROM /nyx/a1_hist INTO TABLE lt_hist WHERE a1mnr = ls_hdr-a1mnr.
+          DESCRIBE TABLE lt_hist LINES DATA(lv_lines).
+*          old has several lines, new has only 1 line (APPROVED_INT).
+          IF lv_lines = 1.
+*            newly created from changed segment, do not delete  - Fall 5
+            CONTINUE.
+          ENDIF.
+        ENDIF.
+        MOVE-CORRESPONDING  ls_hdr TO ls_request_del.
+        ls_request_del-startdate = ls_hdr-begda.
+        ls_request_del-enddate = ls_hdr-endda.
+        ls_request_del-countrycode = ls_hdr-land.
+        CLEAR go_a1_notif.
+        go_context = /nyx/cl_a1_context=>get_instance( iv_refresh = abap_true ).
+        TRY.
+            go_a1_notif = /nyx/cl_a1_notif=>createfromdb( iv_pernr = ls_request_del-pernr iv_a1mnr = ls_request_del-a1mnr ).
+            go_a1_notif->deletefromdb( ).
+          CATCH /nyx/cx_a1_exception.
+            LOOP AT go_context->get_msg( ) INTO gv_msg.
+            ENDLOOP.
+            gv_error = 'X'.
+        ENDTRY.
+        IF gv_error IS NOT INITIAL.
+*   Suitable Error Message
+        ENDIF.
+        CLEAR: gs_hrsst_a1_3.
+        SELECT SINGLE * FROM zhrsst_a1_3 INTO gs_hrsst_a1_3 WHERE a1mnr = ls_request_del-a1mnr.
+*   Lösche Eintrag im IT0700 über FuBa
+*     P0700 schreiben
+        TRY.
+            /nyx/cl_a1_mgr=>sync_0700_dxa1(
+              EXPORTING
+                iv_pernr  = ls_request_del-pernr
+                iv_begda  = ls_request_del-startdate
+                iv_endda  = ls_request_del-enddate
+                iv_update = 'X'
+                iv_userfc = ''
+              IMPORTING
+                et_actions = lt_actions ).
+            COMMIT WORK AND WAIT.
+          CATCH /nyx/cx_a1_exception. " A1: Exception Klasse
+*       Hmm... Eine Message ist im Context
+            LOOP AT go_context->get_msg( ) ASSIGNING <msg>.
+              APPEND INITIAL LINE TO gt_result ASSIGNING <ls_result>.
+              MOVE-CORRESPONDING <msg> TO <ls_result>.
+              <ls_result>-pernr = ls_request-pernr.
+*        <ls_result>-ename = p0001-ename.
+*        <ls_result>-bukrs = p0001-bukrs.
+            ENDLOOP.
+*       Eine weitere Bearbeitung der Actions macht keinen Sinn
+*            EXIT.
+        ENDTRY.
+      ENDLOOP.
+    ENDIF.
+  ENDIF.
+
+* wir haben alles gelöscht, was wir löschen müssen. Now we need to check if we should merge current A1 with newly created A1
+  CLEAR: lt_hdr_tt.
+  TRY.
+      lt_hdr_tt = /nyx/cl_a1_odata=>get_header_list( iv_pernr = ls_request-pernr ).
+    CATCH /nyx/cx_a1_exception.
+      LOOP AT go_context->get_msg( ) INTO gv_msg.
+      ENDLOOP.
+      gv_error = 'X'.
+  ENDTRY.
+  LOOP AT lt_hdr_tt INTO ls_hdr_s WHERE land = ls_request-countrycode AND customer01 CS ls_request-doc_id.
+    IF ls_request-enddate < ls_hdr_s-begda OR ls_request-startdate > ls_hdr_s-endda.
+*          keine überlappung zwischen Segmenten desselben Land
+      CONTINUE.
+    ENDIF.
     TRY.
-        go_a1_notif = /nyx/cl_a1_notif=>createfromdb( iv_pernr = ls_request_del-pernr iv_a1mnr = ls_request_del-a1mnr ).
-        go_a1_notif->deletefromdb( ).
+        ls_clusterdata = /nyx/cl_a1_odata=>read_cluster( iv_pernr = ls_hdr_s-pernr iv_a1mnr = ls_hdr_s-a1mnr ).
       CATCH /nyx/cx_a1_exception.
         LOOP AT go_context->get_msg( ) INTO gv_msg.
         ENDLOOP.
         gv_error = 'X'.
     ENDTRY.
-    IF gv_error IS NOT INITIAL.
-*   Suitable Error Message
-    ENDIF.
+    IF ls_clusterdata-hdr-status = /nyx/cl_a1_util=>gc_status_approved_int.
+*     Update the start date and end date
+      IF ls_request-startdate < ls_hdr_s-begda.
+        ls_clusterdata-hdr-begda = ls_request-startdate.
+      ENDIF.
 
-*   Lösche Eintrag im IT0700 über FuBa
-*     P0700 schreiben
-    TRY.
-        /nyx/cl_a1_mgr=>sync_0700_dxa1(
-          EXPORTING
-            iv_pernr  = ls_request_del-pernr
-            iv_begda  = ls_request_del-startdate
-            iv_endda  = ls_request_del-enddate
-            iv_update = 'X'
-            iv_userfc = ''
-          IMPORTING
-            et_actions = lt_actions ).
-      CATCH /nyx/cx_a1_exception. " A1: Exception Klasse
-*       Hmm... Eine Message ist im Context
-        LOOP AT go_context->get_msg( ) ASSIGNING <msg>.
-          APPEND INITIAL LINE TO gt_result ASSIGNING <ls_result>.
-          MOVE-CORRESPONDING <msg> TO <ls_result>.
-          <ls_result>-pernr = ls_request-pernr.
-*        <ls_result>-ename = p0001-ename.
-*        <ls_result>-bukrs = p0001-bukrs.
+      IF ls_request-enddate > ls_hdr_s-endda.
+        ls_clusterdata-hdr-endda = ls_request-enddate.
+      ENDIF.
+
+* Add the destination
+      DELETE ls_clusterdata-dest WHERE name_bs IS INITIAL AND t536c_key_bs IS INITIAL.
+      CLEAR: lv_bsnr.
+      SORT ls_clusterdata-dest BY bsnr ASCENDING.
+      IF ls_clusterdata-dest IS NOT INITIAL.
+        LOOP AT ls_clusterdata-dest ASSIGNING <dest>.
+          lv_bsnr = <dest>-bsnr.
         ENDLOOP.
-*       Eine weitere Bearbeitung der Actions macht keinen Sinn
-        EXIT.
-    ENDTRY.
-  ENDIF.
-* wir haben alles gelöscht, was wir löschen müssen.
-* jetzt erstellen wir neuen A1-Antrag im A1-Manager und SUBMIT
+      ENDIF.
+      ADD 1 TO lv_bsnr.
+      ls_dest-bsnr = lv_bsnr.
+      ls_dest-pernr = ls_hdr_s-pernr.
+      ls_dest-a1mnr = ls_hdr_s-a1mnr.
+      ls_dest-flag_direkt_bs = 'X'.
+      ls_dest-ort_bs = ls_request-ort_bs.
+      ls_dest-plz_bs = ls_request-plz_bs.
+      ls_dest-strasse_bs = ls_request-strasse_bs.
+      ls_dest-hausnr_bs = ls_request-hausnr_bs.
+      ls_dest-name_bs = ls_request-name_bs.
+      APPEND ls_dest TO ls_clusterdata-dest.
 
-  IF ls_request-name_bs IS NOT INITIAL AND
-     ls_request-strasse_bs IS NOT INITIAL AND
+      ls_clusterdata-hdr-user_action = /nyx/cl_a1_util=>gc_action_submit.
+* Update the A1
+      TRY.
+          /nyx/cl_a1_odata=>update_notification( is_data = ls_clusterdata ).
+        CATCH /nyx/cx_a1_exception.
+          LOOP AT go_context->get_msg( ) INTO gv_msg.
+          ENDLOOP.
+          gv_error = 'X'.
+      ENDTRY.
+      ev_value01 = ls_hdr_s-a1mnr.
+*Send email to traveler
+* Read A1 header
+      TRY.
+          ls_hdr_s = /nyx/cl_a1_odata=>get_header( iv_pernr = ls_request-pernr iv_a1mnr = ls_hdr_s-a1mnr ).
+
+* Get the  preview if the status is SUBMITTED
+          IF ls_hdr-status = /nyx/cl_a1_util=>gc_status_approved_int.
+            CALL METHOD /nyx/cl_a1_odata=>get_pdf
+              EXPORTING
+                iv_pernr = ls_request-pernr
+                iv_a1mnr = ls_hdr_s-a1mnr
+              RECEIVING
+                rt_pdf   = lv_pdf_string.
+
+            IF lv_pdf_string IS NOT INITIAL.
+* Convert xstring to table
+              CLEAR: lt_binary, ls_attachment.
+              CALL FUNCTION 'SCMS_XSTRING_TO_BINARY'
+                EXPORTING
+                  buffer     = lv_pdf_string
+                TABLES
+                  binary_tab = lt_binary.
+
+              IF lt_binary IS NOT INITIAL.
+                ls_attachment-cont_hex = lt_binary.
+                ls_attachment-objtp = 'PDF'.
+                ls_attachment-subject = 'A1-Antrag'.
+                APPEND ls_attachment TO lt_attachment.
+              ENDIF.
+            ENDIF.
+          ENDIF.
+        CATCH /nyx/cx_a1_exception.
+          CLEAR: es_return-message.
+          LOOP AT /nyx/cl_a1_context=>get_instance( )->get_msg( ) ASSIGNING <msg>.
+            es_return-message = <msg>-message.
+          ENDLOOP.
+          IF es_return-message IS NOT INITIAL.
+            RETURN.
+          ENDIF.
+      ENDTRY.
+
+*     Send Mail
+      /nyx/cl_a1_util=>send_mail(
+        EXPORTING
+          iv_pernr = ls_request-pernr
+          iv_a1mnr = ls_hdr_s-a1mnr
+          iv_mailtype = '064'
+          is_message = ls_message
+          it_attachments      = lt_attachment      "
+          iv_sender_uid       = lv_sender_usrid
+*             iv_recipient_uid    = recipient_uid    "
+          iv_sender_mail      = lv_sender_mail
+          iv_recipient_mail   = lv_recipient_mail
+*             it_recipients       = recipients
+          iv_send_immediately = 'X'             "
+          it_key_value_param       = lt_key_value_param
+        RECEIVING
+          ev_success          = lv_success
+      ).
+
+      IF lv_success IS INITIAL.
+        CALL FUNCTION 'BALW_BAPIRETURN_GET1'
+          EXPORTING
+            type       = 'E'
+            cl         = '/NYX/A1'
+            number     = '135'
+          IMPORTING
+            bapireturn = ls_bapiret1
+          EXCEPTIONS
+            OTHERS     = 1.
+        IF sy-subrc = 0.
+          CALL FUNCTION 'BALW_RET1_TO_RET2'
+            EXPORTING
+              return_in = ls_bapiret1
+            IMPORTING
+              return_ou = es_return.
+          IF sy-subrc = 0.
+            RETURN.
+          ELSE.
+            RETURN.
+          ENDIF.
+        ELSE.
+          RETURN.
+        ENDIF.
+      ENDIF.
+
+      RETURN.
+    ENDIF.
+  ENDLOOP.
+
+  IF sy-subrc <> 0.
+*        nothing to merge
+*       jetzt erstellen wir neuen A1-Antrag im A1-Manager und SUBMIT
+    IF ls_request-name_bs IS NOT INITIAL AND
+       ls_request-strasse_bs IS NOT INITIAL AND
 *     ls_request-hausnr_bs IS NOT INITIAL AND
-     ls_request-plz_bs IS NOT INITIAL AND
-     ls_request-ort_bs IS NOT INITIAL.
+       ls_request-plz_bs IS NOT INITIAL AND
+       ls_request-ort_bs IS NOT INITIAL.
 
 *   Versuche zu submitten
-    CALL METHOD /nyx/cl_a1_mgr=>submit_from_concur_do_action
-      EXPORTING
-        is_request = ls_request
-      IMPORTING
-        ev_a1mnr   = lv_a1mnr
-        ev_success = lv_success.
+      CALL METHOD /nyx/cl_a1_mgr=>submit_from_concur_do_action
+        EXPORTING
+          is_request = ls_request
+        IMPORTING
+          ev_a1mnr   = lv_a1mnr
+          ev_success = lv_success.
 
-*     Send Mail mit Vorformular
-    /nyx/cl_a1_util=>send_mail(
-      EXPORTING
-        iv_pernr = ls_request-pernr
-        iv_a1mnr = lv_a1mnr
-        iv_mailtype = '064'
-        is_message = ls_message
-        it_attachments      = lt_attachment      "
-        iv_sender_uid       = lv_sender_usrid
-*             iv_recipient_uid    = recipient_uid    "
-*             iv_sender_mail      = sender_mail      "
-        iv_recipient_mail   = lv_recipient_mail
-*             it_recipients       = recipients
-        iv_send_immediately = 'X'             "
-        it_key_value_param       = lt_key_value_param
-      RECEIVING
-        ev_success          = lv_success
-    ).
-
-    IF lv_success IS INITIAL.
+      IF lv_success IS INITIAL.
 *   in case of errors , save as draft
 
 ********************************************************************************
@@ -532,12 +724,205 @@ FUNCTION zhr_sst_a1_notif_action_change.
 ********************************************************************************
 *   Proceed for A1 creation if the checks are successful
 *   Create A1-Template
+        CALL METHOD /nyx/cl_a1_mgr=>save_from_concur_do_action
+          EXPORTING
+            is_request = ls_request
+          IMPORTING
+            ev_a1mnr   = lv_a1mnr
+            ev_success = lv_success.
+
+        IF lv_success IS INITIAL.
+          CALL FUNCTION 'BALW_BAPIRETURN_GET1'
+            EXPORTING
+              type       = 'E'
+              cl         = '/NYX/A1'
+              number     = '004'
+            IMPORTING
+              bapireturn = ls_bapiret1
+            EXCEPTIONS
+              OTHERS     = 1.
+          IF sy-subrc = 0.
+            CALL FUNCTION 'BALW_RET1_TO_RET2'
+              EXPORTING
+                return_in = ls_bapiret1
+              IMPORTING
+                return_ou = es_return.
+            IF sy-subrc = 0.
+              RETURN.
+            ELSE.
+              RETURN.
+            ENDIF.
+          ELSE.
+            RETURN.
+          ENDIF.
+        ENDIF.
+*      ENDIF.
+        ev_value01 = lv_a1mnr.
+        CLEAR: lt_t005t,
+               ls_t005t.
+
+        CLEAR ls_kv.
+        ls_kv-skey = '@A1MNR@'.
+        ls_kv-svalue = lv_a1mnr.
+        APPEND ls_kv TO lt_key_value_param.
+
+*     get key values
+        CALL METHOD /nyx/cl_a1_util=>get_key_values
+          EXPORTING
+            it_key_value_param = lt_key_value_param
+          IMPORTING
+            et_key_value_param = lt_key_value_param.
+
+* Send Mail
+        /nyx/cl_a1_util=>send_mail(
+          EXPORTING
+            iv_pernr = ls_request-pernr
+            iv_a1mnr = lv_a1mnr
+            iv_mailtype = '050'
+            is_message = ls_message
+*         it_attachments      = attachments      "
+            iv_sender_uid       = lv_sender_usrid
+*         iv_recipient_uid    = recipient_uid    "
+            iv_sender_mail      = lv_sender_mail
+            iv_recipient_mail   = lv_recipient_mail
+*         it_recipients       = recipients
+            iv_send_immediately = 'X'             "
+            it_key_value_param       = lt_key_value_param
+          RECEIVING
+            ev_success          = lv_success
+        ).
+
+        IF lv_success IS INITIAL.
+          CALL FUNCTION 'BALW_BAPIRETURN_GET1'
+            EXPORTING
+              type       = 'E'
+              cl         = '/NYX/A1'
+              number     = '135'
+            IMPORTING
+              bapireturn = ls_bapiret1
+            EXCEPTIONS
+              OTHERS     = 1.
+          IF sy-subrc = 0.
+            CALL FUNCTION 'BALW_RET1_TO_RET2'
+              EXPORTING
+                return_in = ls_bapiret1
+              IMPORTING
+                return_ou = es_return.
+            IF sy-subrc = 0.
+              RETURN.
+            ELSE.
+              RETURN.
+            ENDIF.
+          ELSE.
+            RETURN.
+          ENDIF.
+        ENDIF.
+
+      ELSE.
+*     submit successful, send mail with Request Form
+        ev_value01 = lv_a1mnr.
+
+* Read A1 header
+        TRY.
+            ls_hdr_s = /nyx/cl_a1_odata=>get_header( iv_pernr = ls_request-pernr iv_a1mnr = lv_a1mnr ).
+
+* Get the  preview if the status is SUBMITTED
+            IF ls_hdr_s-status = /nyx/cl_a1_util=>gc_status_approved_int.
+              CALL METHOD /nyx/cl_a1_odata=>get_pdf
+                EXPORTING
+                  iv_pernr = ls_request-pernr
+                  iv_a1mnr = lv_a1mnr
+                RECEIVING
+                  rt_pdf   = lv_pdf_string.
+
+              IF lv_pdf_string IS NOT INITIAL.
+* Convert xstring to table
+                CLEAR: lt_binary, ls_attachment.
+                CALL FUNCTION 'SCMS_XSTRING_TO_BINARY'
+                  EXPORTING
+                    buffer     = lv_pdf_string
+                  TABLES
+                    binary_tab = lt_binary.
+
+                IF lt_binary IS NOT INITIAL.
+                  ls_attachment-cont_hex = lt_binary.
+                  ls_attachment-objtp = 'PDF'.
+                  ls_attachment-subject = 'A1-Antrag'.
+                  APPEND ls_attachment TO lt_attachment.
+                ENDIF.
+              ENDIF.
+            ENDIF.
+          CATCH /nyx/cx_a1_exception.
+            CLEAR: es_return-message.
+            LOOP AT /nyx/cl_a1_context=>get_instance( )->get_msg( ) ASSIGNING <msg>.
+              es_return-message = <msg>-message.
+            ENDLOOP.
+            IF es_return-message IS NOT INITIAL.
+              RETURN.
+            ENDIF.
+        ENDTRY.
+
+*     Send Mail with form
+        /nyx/cl_a1_util=>send_mail(
+          EXPORTING
+            iv_pernr = ls_request-pernr
+            iv_a1mnr = lv_a1mnr
+            iv_mailtype = '064'   "mail type with formular
+            is_message = ls_message
+            it_attachments      = lt_attachment      "
+            iv_sender_uid       = lv_sender_usrid
+*             iv_recipient_uid    = recipient_uid    "
+            iv_sender_mail      = lv_sender_mail
+            iv_recipient_mail   = lv_recipient_mail
+*             it_recipients       = recipients
+            iv_send_immediately = 'X'             "
+            it_key_value_param       = lt_key_value_param
+          RECEIVING
+            ev_success          = lv_success
+        ).
+
+        IF lv_success IS INITIAL.
+          CALL FUNCTION 'BALW_BAPIRETURN_GET1'
+            EXPORTING
+              type       = 'E'
+              cl         = '/NYX/A1'
+              number     = '135'
+            IMPORTING
+              bapireturn = ls_bapiret1
+            EXCEPTIONS
+              OTHERS     = 1.
+          IF sy-subrc = 0.
+            CALL FUNCTION 'BALW_RET1_TO_RET2'
+              EXPORTING
+                return_in = ls_bapiret1
+              IMPORTING
+                return_ou = es_return.
+            IF sy-subrc = 0.
+              RETURN.
+            ELSE.
+              RETURN.
+            ENDIF.
+          ELSE.
+            RETURN.
+          ENDIF.
+        ENDIF.
+      ENDIF.
+    ELSE.
+* Address not available, try to save A1 as draft and send email
+********************************************************************************
+* Do action
+*->A1 Creation
+*->Send Email if A1 creation is successful
+********************************************************************************
+*   Proceed for A1 creation if the checks are successful
+*   Create A1-Template
       CALL METHOD /nyx/cl_a1_mgr=>save_from_concur_do_action
         EXPORTING
           is_request = ls_request
         IMPORTING
           ev_a1mnr   = lv_a1mnr
           ev_success = lv_success.
+
 
       IF lv_success IS INITIAL.
         CALL FUNCTION 'BALW_BAPIRETURN_GET1'
@@ -564,7 +949,7 @@ FUNCTION zhr_sst_a1_notif_action_change.
           RETURN.
         ENDIF.
       ENDIF.
-*      ENDIF.
+
       ev_value01 = lv_a1mnr.
       CLEAR: lt_t005t,
              ls_t005t.
@@ -574,7 +959,7 @@ FUNCTION zhr_sst_a1_notif_action_change.
       ls_kv-svalue = lv_a1mnr.
       APPEND ls_kv TO lt_key_value_param.
 
-*     get key values
+* get key values
       CALL METHOD /nyx/cl_a1_util=>get_key_values
         EXPORTING
           it_key_value_param = lt_key_value_param
@@ -625,197 +1010,13 @@ FUNCTION zhr_sst_a1_notif_action_change.
           RETURN.
         ENDIF.
       ENDIF.
-
-    ELSE.
-*     submit successful, send mail with Request Form
-      ev_value01 = lv_a1mnr.
-
-* Read A1 header
-      TRY.
-          ls_hdr_s = /nyx/cl_a1_odata=>get_header( iv_pernr = ls_request-pernr iv_a1mnr = lv_a1mnr ).
-
-* Get the  preview if the status is SUBMITTED
-          IF ls_hdr_s-status = /nyx/cl_a1_util=>gc_status_approved_int.
-            CALL METHOD /nyx/cl_a1_odata=>get_pdf
-              EXPORTING
-                iv_pernr = ls_request-pernr
-                iv_a1mnr = lv_a1mnr
-              RECEIVING
-                rt_pdf   = lv_pdf_string.
-
-            IF lv_pdf_string IS NOT INITIAL.
-* Convert xstring to table
-              CLEAR: lt_binary, ls_attachment.
-              CALL FUNCTION 'SCMS_XSTRING_TO_BINARY'
-                EXPORTING
-                  buffer     = lv_pdf_string
-                TABLES
-                  binary_tab = lt_binary.
-
-              IF lt_binary IS NOT INITIAL.
-                ls_attachment-cont_hex = lt_binary.
-                ls_attachment-objtp = 'PDF'.
-                ls_attachment-subject = 'A1-Antrag'.
-                APPEND ls_attachment TO lt_attachment.
-              ENDIF.
-            ENDIF.
-          ENDIF.
-        CATCH /nyx/cx_a1_exception.
-          LOOP AT /nyx/cl_a1_context=>get_instance( )->get_msg( ) ASSIGNING <msg>.
-            es_return-message = <msg>-message.
-            RETURN.
-          ENDLOOP.
-
-      ENDTRY.
-
-*     Send Mail with form
-      /nyx/cl_a1_util=>send_mail(
-        EXPORTING
-          iv_pernr = ls_request-pernr
-          iv_a1mnr = lv_a1mnr
-          iv_mailtype = '064'   "mail type with formular
-          is_message = ls_message
-          it_attachments      = lt_attachment      "
-          iv_sender_uid       = lv_sender_usrid
-*             iv_recipient_uid    = recipient_uid    "
-          iv_sender_mail      = lv_sender_mail
-          iv_recipient_mail   = lv_recipient_mail
-*             it_recipients       = recipients
-          iv_send_immediately = 'X'             "
-          it_key_value_param       = lt_key_value_param
-        RECEIVING
-          ev_success          = lv_success
-      ).
-
-      IF lv_success IS INITIAL.
-        CALL FUNCTION 'BALW_BAPIRETURN_GET1'
-          EXPORTING
-            type       = 'E'
-            cl         = '/NYX/A1'
-            number     = '135'
-          IMPORTING
-            bapireturn = ls_bapiret1
-          EXCEPTIONS
-            OTHERS     = 1.
-        IF sy-subrc = 0.
-          CALL FUNCTION 'BALW_RET1_TO_RET2'
-            EXPORTING
-              return_in = ls_bapiret1
-            IMPORTING
-              return_ou = es_return.
-          IF sy-subrc = 0.
-            RETURN.
-          ELSE.
-            RETURN.
-          ENDIF.
-        ELSE.
-          RETURN.
-        ENDIF.
-      ENDIF.
-    ENDIF.
-  ELSE.
-* Address not available, try to save A1 as draft and send email
-********************************************************************************
-* Do action
-*->A1 Creation
-*->Send Email if A1 creation is successful
-********************************************************************************
-*   Proceed for A1 creation if the checks are successful
-*   Create A1-Template
-    CALL METHOD /nyx/cl_a1_mgr=>save_from_concur_do_action
-      EXPORTING
-        is_request = ls_request
-      IMPORTING
-        ev_a1mnr   = lv_a1mnr
-        ev_success = lv_success.
-
-
-    IF lv_success IS INITIAL.
-      CALL FUNCTION 'BALW_BAPIRETURN_GET1'
-        EXPORTING
-          type       = 'E'
-          cl         = '/NYX/A1'
-          number     = '004'
-        IMPORTING
-          bapireturn = ls_bapiret1
-        EXCEPTIONS
-          OTHERS     = 1.
-      IF sy-subrc = 0.
-        CALL FUNCTION 'BALW_RET1_TO_RET2'
-          EXPORTING
-            return_in = ls_bapiret1
-          IMPORTING
-            return_ou = es_return.
-        IF sy-subrc = 0.
-          RETURN.
-        ELSE.
-          RETURN.
-        ENDIF.
-      ELSE.
-        RETURN.
-      ENDIF.
-    ENDIF.
-
-    ev_value01 = lv_a1mnr.
-    CLEAR: lt_t005t,
-           ls_t005t.
-
-    CLEAR ls_kv.
-    ls_kv-skey = '@A1MNR@'.
-    ls_kv-svalue = lv_a1mnr.
-    APPEND ls_kv TO lt_key_value_param.
-
-* get key values
-    CALL METHOD /nyx/cl_a1_util=>get_key_values
-      EXPORTING
-        it_key_value_param = lt_key_value_param
-      IMPORTING
-        et_key_value_param = lt_key_value_param.
-
-* Send Mail
-    /nyx/cl_a1_util=>send_mail(
-      EXPORTING
-        iv_pernr = ls_request-pernr
-        iv_a1mnr = lv_a1mnr
-        iv_mailtype = '050'
-        is_message = ls_message
-*         it_attachments      = attachments      "
-        iv_sender_uid       = lv_sender_usrid
-*         iv_recipient_uid    = recipient_uid    "
-        iv_sender_mail      = lv_sender_mail
-        iv_recipient_mail   = lv_recipient_mail
-*         it_recipients       = recipients
-        iv_send_immediately = 'X'             "
-        it_key_value_param       = lt_key_value_param
-      RECEIVING
-        ev_success          = lv_success
-    ).
-
-    IF lv_success IS INITIAL.
-      CALL FUNCTION 'BALW_BAPIRETURN_GET1'
-        EXPORTING
-          type       = 'E'
-          cl         = '/NYX/A1'
-          number     = '135'
-        IMPORTING
-          bapireturn = ls_bapiret1
-        EXCEPTIONS
-          OTHERS     = 1.
-      IF sy-subrc = 0.
-        CALL FUNCTION 'BALW_RET1_TO_RET2'
-          EXPORTING
-            return_in = ls_bapiret1
-          IMPORTING
-            return_ou = es_return.
-        IF sy-subrc = 0.
-          RETURN.
-        ELSE.
-          RETURN.
-        ENDIF.
-      ELSE.
-        RETURN.
-      ENDIF.
     ENDIF.
   ENDIF.
-
+  IF ev_value01 IS NOT INITIAL AND gs_hrsst_a1_3 IS NOT INITIAL.
+    IF ev_value01 <> gs_hrsst_a1_3-a1mnr AND gs_hrsst_a1_3-a1mnr_new IS INITIAL.
+      gs_hrsst_a1_3-a1mnr_new = ev_value01.
+      MODIFY zhrsst_a1_3 FROM gs_hrsst_a1_3.
+      COMMIT WORK AND WAIT.
+    ENDIF.
+  ENDIF.
 ENDFUNCTION.
