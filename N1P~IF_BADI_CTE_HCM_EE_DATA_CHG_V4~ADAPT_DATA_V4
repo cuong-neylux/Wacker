@@ -1,0 +1,133 @@
+  METHOD IF_BADI_CTE_HCM_EE_DATA_CHG_V4~ADAPT_DATA_V4.
+
+*   Local Data
+    DATA lt_cte_hcm_01 TYPE TABLE OF /NYX/BSINXX01V01.
+    DATA ls_cte_hcm_01 TYPE /NYX/BSINXX01V01.
+    DATA lt_pa0105 TYPE STANDARD TABLE OF pa0105.
+    DATA ls_pa0105 TYPE pa0105.
+    DATA ls_entitlement TYPE cte_api_string.
+    DATA ls_ee_loginid TYPE cte_d_ee_loginid.
+    DATA ls_approver TYPE cte_s_ee_bd_user_reference.
+    DATA ls_approver_reference TYPE cte_s_ee_bd_approver_reference.
+    DATA lt_0000 TYPE STANDARD TABLE OF pa0000.
+    DATA lt_bsxxhr06 TYPE STANDARD TABLE OF /nyx/bsxxhr06.
+    DATA ls_bsxxhr06 TYPE /nyx/bsxxhr06.
+    DATA ls_role_reference TYPE cte_s_ee_bd_role_reference.
+
+    FIELD-SYMBOLS <fs_ee_bd_data> TYPE cte_s_ee_bd_data.
+    FIELD-SYMBOLS <fs_ee_custom> TYPE cte_s_ee_bd_custom_data.
+
+*   Read Customizing for Exception Approvers
+    SELECT * FROM /NYX/BSINXX01V01 INTO TABLE lt_cte_hcm_01 "#EC CI_SUBRC
+      WHERE
+        endda >= sy-datum AND
+        begda <= sy-datum.                              "#EC CI_NOFIRST
+
+*   Read Customizing for Company Car
+    SELECT * FROM pa0105 INTO TABLE lt_pa0105           "#EC CI_SUBRC
+      WHERE                                             "#EC CI_ALL_FIELDS_NEEDED
+        endda >= sy-datum AND
+        begda <= sy-datum AND
+        subty = '0099'.                                 "#EC CI_NOFIRST
+
+*   Select leads from  /NYX/BSXXHR06
+    SELECT * "#EC CI_SUBRC
+      FROM /nyx/bsxxhr06   "#EC CI_NOWHERE
+      INTO TABLE lt_bsxxhr06. "#EC CI_NOFIRST
+
+*   Get active MAs
+    SELECT * FROM pa0000 INTO TABLE lt_0000 "#EC CI_SUBRC
+           WHERE endda >= sy-datum AND      "#EC CI_ALL_FIELDS_NEEDED
+            begda <= sy-datum AND
+            stat2 <> '0'.
+
+    LOOP AT ct_ee_bd_data ASSIGNING <fs_ee_bd_data>.
+*     Change Expense Approver for manager
+      CLEAR: ls_cte_hcm_01.
+      READ TABLE lt_cte_hcm_01
+        WITH KEY appr_pernr = <fs_ee_bd_data>-enterprise_user_schema-employee_number
+        INTO ls_cte_hcm_01.
+      IF ls_cte_hcm_01 IS NOT INITIAL.
+        SHIFT ls_cte_hcm_01-appr_pernr LEFT DELETING LEADING '0'.
+        SHIFT ls_cte_hcm_01-exc_app_pernr LEFT DELETING LEADING '0'.
+        CLEAR: ls_ee_loginid.
+        SELECT SINGLE * FROM cte_d_ee_loginid INTO CORRESPONDING FIELDS OF ls_ee_loginid "#EC CI_SUBRC
+          WHERE system_key = '1' AND objid = ls_cte_hcm_01-exc_app_pernr.                "#EC CI_ALL_FIELDS_NEEDED
+        <fs_ee_bd_data>-enterprise_user_schema-manager-value = ls_ee_loginid-employee_uuid.
+*       Change BI Approver
+        <fs_ee_bd_data>-enterprise_spend_user_schema-bi_manager_struc-employee_number = ls_cte_hcm_01-exc_app_pernr.
+        <fs_ee_bd_data>-enterprise_spend_user_schema-bi_manager_struc-value = ls_ee_loginid-employee_uuid.
+*       Spend approver schema
+        CLEAR: ls_approver, ls_approver_reference.
+        ls_approver-employee_number = ls_cte_hcm_01-exc_app_pernr.
+        ls_approver-value = ls_ee_loginid-employee_uuid.
+        ls_approver_reference-primary = 'X'.
+        ls_approver_reference-approver = ls_approver.
+        APPEND ls_approver_reference TO <fs_ee_bd_data>-spend_approver_schema-report.
+        APPEND ls_approver_reference TO <fs_ee_bd_data>-spend_approver_schema-request.
+*       Travel user
+        <fs_ee_bd_data>-travel_user-manager-employee_number = ls_cte_hcm_01-exc_app_pernr.
+        <fs_ee_bd_data>-travel_user-manager-value = ls_ee_loginid-employee_uuid.
+        READ TABLE lt_cte_hcm_01 WITH KEY appr_pernr = <fs_ee_bd_data>-enterprise_user_schema-employee_number
+            TRANSPORTING NO FIELDS.
+        IF sy-subrc = 0.
+*         is manager, change travel rule class
+          <fs_ee_bd_data>-travel_user-rule_class-name = 'neylux Geschäftsführung'.
+        ENDIF.
+      ENDIF.
+
+*     Company Car
+      READ TABLE lt_pa0105
+         WITH KEY pernr = <fs_ee_bd_data>-enterprise_user_schema-employee_number
+         INTO ls_pa0105.
+      READ TABLE <fs_ee_bd_data>-enterprise_spend_user_schema-custom_data WITH KEY id = 'custom1' ASSIGNING <fs_ee_custom>.
+      IF <fs_ee_custom> IS ASSIGNED.
+        IF ls_pa0105-usrid = 'N' OR ls_pa0105-usrid IS INITIAL.
+          <fs_ee_custom>-value = 'N'.
+        ELSE.
+          <fs_ee_custom>-value = 'Y'.
+        ENDIF.
+      ENDIF.
+
+*     Roles
+      CLEAR: ls_entitlement, <fs_ee_bd_data>-entitlements.
+      ls_entitlement = 'Expense'.
+      APPEND ls_entitlement TO <fs_ee_bd_data>-entitlements.
+      ls_entitlement = 'Travel'.
+      APPEND ls_entitlement TO <fs_ee_bd_data>-entitlements.
+      ls_entitlement = 'Request'.
+      APPEND ls_entitlement TO <fs_ee_bd_data>-entitlements.
+*     add role Invoice User for Sigi
+      IF  <fs_ee_bd_data>-enterprise_user_schema-employee_number = 2.
+        ls_entitlement = 'Invoice'.
+        APPEND ls_entitlement TO <fs_ee_bd_data>-entitlements.
+      ENDIF.
+
+      CLEAR: ls_bsxxhr06.
+      READ TABLE lt_bsxxhr06 INTO ls_bsxxhr06 WITH KEY pernr_lead = <fs_ee_bd_data>-enterprise_user_schema-employee_number.
+*     set request approver role if MA is lead
+      IF sy-subrc = 0.
+        CLEAR: ls_role_reference.
+        ls_role_reference-role_name = 'REQ_APPROVER'.
+        APPEND ls_role_reference TO <fs_ee_bd_data>-enterprise_spend_role_schema-roles.
+      ENDIF.
+
+
+*     Find the request approver from table /NYX/BSXXHR06
+*      CLEAR: ls_bsxxhr06.
+*      READ TABLE lt_bsxxhr06 INTO ls_bsxxhr06 WITH KEY pernr = <fs_ee_bd_data>-enterprise_user_schema-employee_number.
+*      IF sy-subrc = 0.
+**        lead found, check if lead is active
+*        READ TABLE lt_0000 WITH KEY pernr = ls_bsxxhr06-pernr_lead TRANSPORTING NO FIELDS.
+*        IF sy-subrc = 0.
+**          lead is active, change request approver
+*          CLEAR: ls_approver_reference, <fs_ee_bd_data>-spend_approver_schema-request.
+*          ls_approver_reference-primary = 'X'.
+*          ls_approver_reference-approver-employee_number = ls_bsxxhr06-pernr_lead.
+*          SHIFT ls_approver_reference-approver-employee_number LEFT DELETING LEADING '0'.
+*          APPEND ls_approver_reference TO <fs_ee_bd_data>-spend_approver_schema-request.
+*        ENDIF.
+*      ENDIF.
+    ENDLOOP.
+
+  ENDMETHOD.
