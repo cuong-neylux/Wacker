@@ -676,6 +676,7 @@ FUNCTION zhr_sst_a1_notif_action_creat2.
 *          ENDIF.
 
 * Add the destination
+          DELETE ls_clusterdata-dest WHERE name_bs IS INITIAL AND t536c_key_bs IS INITIAL.
           SORT ls_clusterdata-dest BY bsnr ASCENDING.
 
           CLEAR: lv_bsnr.
