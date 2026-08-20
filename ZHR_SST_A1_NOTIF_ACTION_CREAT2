@@ -678,14 +678,12 @@ FUNCTION zhr_sst_a1_notif_action_creat2.
 * Add the destination
           DELETE ls_clusterdata-dest WHERE name_bs IS INITIAL AND t536c_key_bs IS INITIAL.
           SORT ls_clusterdata-dest BY bsnr ASCENDING.
-
           CLEAR: lv_bsnr.
           IF ls_clusterdata-dest IS NOT INITIAL.
             LOOP AT ls_clusterdata-dest ASSIGNING <dest>.
               lv_bsnr = <dest>-bsnr.
             ENDLOOP.
           ENDIF.
-
           ADD 1 TO lv_bsnr.
           ls_dest-bsnr = lv_bsnr.
           ls_dest-pernr = ls_hdr-pernr.
@@ -963,6 +961,7 @@ FUNCTION zhr_sst_a1_notif_action_creat2.
           IF es_return-message IS NOT INITIAL.
             RETURN.
           ENDIF.
+
       ENDTRY.
 
 *     Send Mail
