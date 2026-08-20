@@ -1,6 +1,6 @@
 FUNCTION zhr_sst_a1_notif_action_create.
 *"----------------------------------------------------------------------
-*"*"Local Interface:
+*"*"Lokale Schnittstelle:
 *"  IMPORTING
 *"     VALUE(IV_VALUE01) TYPE  /NYX/A1_TEXT255 OPTIONAL
 *"     VALUE(IV_VALUE02) TYPE  /NYX/A1_TEXT255 OPTIONAL
@@ -66,8 +66,6 @@ FUNCTION zhr_sst_a1_notif_action_create.
   DATA ls_sccoreq18v4 TYPE /nyx/sccoreq18v4.
   DATA lt_sccoreq18v4 TYPE TABLE OF /nyx/sccoreq18v4.
   DATA ls_sccoreq19v4 TYPE /nyx/sccoreq19v4.
-  DATA ls_sccoreq21v4 TYPE /nyx/sccoreq21v4.
-  DATA lt_sccoreq21v4 TYPE TABLE OF /nyx/sccoreq21v4.
   DATA lv_pernr TYPE personid.
   DATA lt_personid TYPE hrpersonid_tab.
   DATA ls_personee TYPE hrpersonee_s.
@@ -93,6 +91,7 @@ FUNCTION zhr_sst_a1_notif_action_create.
 
   FIELD-SYMBOLS <msg> TYPE bapiret2.
   FIELD-SYMBOLS: <dest> TYPE /nyx/a1_dest_s.
+  FIELD-SYMBOLS: <fs_kv> TYPE /nyx/a1_key_val_param_s..
 
   CLEAR: lv_msg1,lv_msg2.
 
@@ -387,6 +386,11 @@ FUNCTION zhr_sst_a1_notif_action_create.
   ELSE.
     IF ls_sccoreq18v4-enddate IS NOT INITIAL.
 *     take  enddate of specific segment
+      READ TABLE lt_key_value_param ASSIGNING <fs_kv> WITH KEY skey = '@ENDDATE@'.
+      IF <fs_kv> IS ASSIGNED.
+        <fs_kv>-svalue = ls_sccoreq18v4-enddate.
+      ENDIF.
+      REPLACE ALL OCCURRENCES OF SUBSTRING '-' IN ls_sccoreq18v4-enddate WITH ''.
       ls_request-enddate = ls_sccoreq18v4-enddate.
     ENDIF.
   ENDIF.
@@ -444,14 +448,17 @@ FUNCTION zhr_sst_a1_notif_action_create.
             OTHERS            = 6.
         IF sy-subrc = 0.
           IF ls_address_data IS NOT INITIAL.
-            ls_request-name_bs = ls_address_data-name1.
-            ls_request-strasse_bs = ls_address_data-street.
-            ls_request-hausnr_bs = ls_address_data-house_num1.
-            ls_request-plz_bs = ls_address_data-post_code1.
-            ls_request-ort_bs = ls_address_data-city1.
+            IF ls_request-countrycode <> ls_address_data-country.
+              CLEAR: ls_request-name_bs, ls_request-strasse_bs, ls_request-hausnr_bs, ls_request-plz_bs, ls_request-ort_bs.
+            ELSE.
+              ls_request-name_bs = ls_address_data-name1.
+              ls_request-strasse_bs = ls_address_data-street.
+              ls_request-hausnr_bs = ls_address_data-house_num1.
+              ls_request-plz_bs = ls_address_data-post_code1.
+              ls_request-ort_bs = ls_address_data-city1.
+            ENDIF.
           ENDIF.
         ENDIF.
-
     ENDCASE.
   ENDSELECT.
 
@@ -552,8 +559,12 @@ FUNCTION zhr_sst_a1_notif_action_create.
   TRY.
       lt_hdr = /nyx/cl_a1_odata=>get_header_list( iv_pernr = ls_request-pernr ).
       LOOP AT lt_hdr INTO ls_hdr WHERE land = ls_request-countrycode AND customer01 CS ls_request-doc_id.
+        IF ls_request-enddate < ls_hdr-begda OR ls_request-startdate > ls_hdr-endda.
+*          keine überlappung zwischen Segmenten desselben Land
+          CONTINUE.
+        ENDIF.
         ls_clusterdata = /nyx/cl_a1_odata=>read_cluster( iv_pernr = ls_hdr-pernr iv_a1mnr = ls_hdr-a1mnr ).
-        IF ls_clusterdata-hdr-status = /nyx/cl_a1_util=>gc_status_approved_int.
+        IF ls_clusterdata-hdr-status = /nyx/cl_a1_util=>gc_status_approved_int OR ls_clusterdata-hdr-status = /nyx/cl_a1_util=>gc_status_draft.
 * Update the start date and end date
 *          IF ls_request-startdate <= ls_hdr-begda AND ls_request-enddate >= ls_hdr-begda.
 *            ls_clusterdata-hdr-begda = ls_request-startdate.
@@ -571,10 +582,14 @@ FUNCTION zhr_sst_a1_notif_action_create.
 *          ENDIF.
 
 * Add the destination
+          DELETE ls_clusterdata-dest WHERE name_bs IS INITIAL AND t536c_key_bs IS INITIAL.
           SORT ls_clusterdata-dest BY bsnr ASCENDING.
-          LOOP AT ls_clusterdata-dest ASSIGNING <dest>.
-            lv_bsnr = <dest>-bsnr.
-          ENDLOOP.
+          CLEAR: lv_bsnr.
+          IF ls_clusterdata-dest IS NOT INITIAL.
+            LOOP AT ls_clusterdata-dest ASSIGNING <dest>.
+              lv_bsnr = <dest>-bsnr.
+            ENDLOOP.
+          ENDIF.
           ADD 1 TO lv_bsnr.
           ls_dest-bsnr = lv_bsnr.
           ls_dest-pernr = ls_hdr-pernr.
@@ -602,7 +617,7 @@ FUNCTION zhr_sst_a1_notif_action_create.
                 CALL METHOD /nyx/cl_a1_odata=>get_pdf
                   EXPORTING
                     iv_pernr = ls_request-pernr
-                    iv_a1mnr = lv_a1mnr
+                    iv_a1mnr = ls_hdr-a1mnr
                   RECEIVING
                     rt_pdf   = lv_pdf_string.
 
@@ -845,10 +860,13 @@ FUNCTION zhr_sst_a1_notif_action_create.
             ENDIF.
           ENDIF.
         CATCH /nyx/cx_a1_exception.
+          CLEAR: es_return-message.
           LOOP AT /nyx/cl_a1_context=>get_instance( )->get_msg( ) ASSIGNING <msg>.
             es_return-message = <msg>-message.
-            RETURN.
           ENDLOOP.
+          IF es_return-message IS NOT INITIAL.
+            RETURN.
+          ENDIF.
 
       ENDTRY.
 
