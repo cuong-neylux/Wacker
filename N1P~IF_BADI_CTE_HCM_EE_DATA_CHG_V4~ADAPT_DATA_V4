@@ -1,133 +1,252 @@
-  METHOD IF_BADI_CTE_HCM_EE_DATA_CHG_V4~ADAPT_DATA_V4.
+  METHOD if_badi_cte_hcm_ee_data_chg_v4~adapt_data_v4.
+    DATA: lv_pernr_boss TYPE pernr_d.
+    DATA: ls_approver_reference TYPE cte_s_ee_bd_approver_reference.
+    DATA: ls_approver TYPE cte_s_ee_bd_user_reference.
+    DATA: ls_ee_loginid TYPE cte_d_ee_loginid.
+    DATA: lt_lead_rel TYPE zhr_sst_concur_tt_01.
+    DATA: ls_lead_rel TYPE zhr_sst_concur_s_01.
+    DATA: lv_pernr TYPE persno.
+    DATA: lv_cen_pernr TYPE personid.
+    DATA: lt_personid TYPE hrpersonid_tab.
+    DATA: ls_personee TYPE hrpersonee_s.
+    DATA: lt_personee TYPE hrpersonee_t.
+    DATA: ls_hrpersonee TYPE hrpersonee_s.
+    DATA: ls_entitlement TYPE cte_api_string.
+    DATA ls_p0001 TYPE p0001.
+    DATA ls_custom TYPE cte_s_ee_bd_travel_custom_data.
+    DATA ls_hrp1000 TYPE hrp1000.
 
-*   Local Data
-    DATA lt_cte_hcm_01 TYPE TABLE OF /NYX/BSINXX01V01.
-    DATA ls_cte_hcm_01 TYPE /NYX/BSINXX01V01.
-    DATA lt_pa0105 TYPE STANDARD TABLE OF pa0105.
-    DATA ls_pa0105 TYPE pa0105.
-    DATA ls_entitlement TYPE cte_api_string.
-    DATA ls_ee_loginid TYPE cte_d_ee_loginid.
-    DATA ls_approver TYPE cte_s_ee_bd_user_reference.
-    DATA ls_approver_reference TYPE cte_s_ee_bd_approver_reference.
-    DATA lt_0000 TYPE STANDARD TABLE OF pa0000.
-    DATA lt_bsxxhr06 TYPE STANDARD TABLE OF /nyx/bsxxhr06.
-    DATA ls_bsxxhr06 TYPE /nyx/bsxxhr06.
-    DATA ls_role_reference TYPE cte_s_ee_bd_role_reference.
-
-    FIELD-SYMBOLS <fs_ee_bd_data> TYPE cte_s_ee_bd_data.
-    FIELD-SYMBOLS <fs_ee_custom> TYPE cte_s_ee_bd_custom_data.
-
-*   Read Customizing for Exception Approvers
-    SELECT * FROM /NYX/BSINXX01V01 INTO TABLE lt_cte_hcm_01 "#EC CI_SUBRC
-      WHERE
-        endda >= sy-datum AND
-        begda <= sy-datum.                              "#EC CI_NOFIRST
-
-*   Read Customizing for Company Car
-    SELECT * FROM pa0105 INTO TABLE lt_pa0105           "#EC CI_SUBRC
-      WHERE                                             "#EC CI_ALL_FIELDS_NEEDED
-        endda >= sy-datum AND
-        begda <= sy-datum AND
-        subty = '0099'.                                 "#EC CI_NOFIRST
-
-*   Select leads from  /NYX/BSXXHR06
-    SELECT * "#EC CI_SUBRC
-      FROM /nyx/bsxxhr06   "#EC CI_NOWHERE
-      INTO TABLE lt_bsxxhr06. "#EC CI_NOFIRST
-
-*   Get active MAs
-    SELECT * FROM pa0000 INTO TABLE lt_0000 "#EC CI_SUBRC
-           WHERE endda >= sy-datum AND      "#EC CI_ALL_FIELDS_NEEDED
-            begda <= sy-datum AND
-            stat2 <> '0'.
+    FIELD-SYMBOLS: <fs_ee_bd_data> TYPE cte_s_ee_bd_data.
 
     LOOP AT ct_ee_bd_data ASSIGNING <fs_ee_bd_data>.
-*     Change Expense Approver for manager
-      CLEAR: ls_cte_hcm_01.
-      READ TABLE lt_cte_hcm_01
-        WITH KEY appr_pernr = <fs_ee_bd_data>-enterprise_user_schema-employee_number
-        INTO ls_cte_hcm_01.
-      IF ls_cte_hcm_01 IS NOT INITIAL.
-        SHIFT ls_cte_hcm_01-appr_pernr LEFT DELETING LEADING '0'.
-        SHIFT ls_cte_hcm_01-exc_app_pernr LEFT DELETING LEADING '0'.
-        CLEAR: ls_ee_loginid.
-        SELECT SINGLE * FROM cte_d_ee_loginid INTO CORRESPONDING FIELDS OF ls_ee_loginid "#EC CI_SUBRC
-          WHERE system_key = '1' AND objid = ls_cte_hcm_01-exc_app_pernr.                "#EC CI_ALL_FIELDS_NEEDED
-        <fs_ee_bd_data>-enterprise_user_schema-manager-value = ls_ee_loginid-employee_uuid.
-*       Change BI Approver
-        <fs_ee_bd_data>-enterprise_spend_user_schema-bi_manager_struc-employee_number = ls_cte_hcm_01-exc_app_pernr.
-        <fs_ee_bd_data>-enterprise_spend_user_schema-bi_manager_struc-value = ls_ee_loginid-employee_uuid.
-*       Spend approver schema
-        CLEAR: ls_approver, ls_approver_reference.
-        ls_approver-employee_number = ls_cte_hcm_01-exc_app_pernr.
-        ls_approver-value = ls_ee_loginid-employee_uuid.
-        ls_approver_reference-primary = 'X'.
-        ls_approver_reference-approver = ls_approver.
-        APPEND ls_approver_reference TO <fs_ee_bd_data>-spend_approver_schema-report.
-        APPEND ls_approver_reference TO <fs_ee_bd_data>-spend_approver_schema-request.
-*       Travel user
-        <fs_ee_bd_data>-travel_user-manager-employee_number = ls_cte_hcm_01-exc_app_pernr.
-        <fs_ee_bd_data>-travel_user-manager-value = ls_ee_loginid-employee_uuid.
-        READ TABLE lt_cte_hcm_01 WITH KEY appr_pernr = <fs_ee_bd_data>-enterprise_user_schema-employee_number
-            TRANSPORTING NO FIELDS.
+      CLEAR: lv_pernr_boss,lt_personid, lt_personee.
+      lv_cen_pernr = <fs_ee_bd_data>-enterprise_user_schema-employee_number.
+
+*Convert central pernr to sap pernr
+      CALL FUNCTION 'HR_PERSONEE_GETEMPLOYEE'
+        EXPORTING
+          iv_person_id      = lv_cen_pernr
+          iv_with_authority = ''
+        IMPORTING
+          et_hrpersonee     = lt_personee.
+
+      IF sy-subrc <> 0.
+        CONTINUE.
+      ENDIF.
+
+* Read the sap pernr
+      CLEAR: ls_personee, lv_pernr.
+      LOOP AT lt_personee INTO ls_personee.
+        READ TABLE it_p0001 WITH KEY pernr = ls_personee-employeeid TRANSPORTING NO FIELDS.
         IF sy-subrc = 0.
-*         is manager, change travel rule class
-          <fs_ee_bd_data>-travel_user-rule_class-name = 'neylux Geschäftsführung'.
+          lv_pernr = ls_personee-employeeid.
+          EXIT.
+        ENDIF.
+      ENDLOOP.
+
+* Call the FuMo ZHR_SST_CONCUR_FIND_BOSS_STF to find approver of the employee
+      IF lv_pernr IS NOT INITIAL.
+        CALL FUNCTION 'ZHR_SST_CONCUR_FIND_BOSS_STF'
+          EXPORTING
+            pernr_ma                   = lv_pernr
+            datum                      = sy-datum
+          CHANGING
+            et_lead_rel                = lt_lead_rel
+          EXCEPTIONS
+            missing_import_param       = 1
+            no_assignments_found       = 2
+            no_org_assign_found        = 3
+            no_boss_assign_found       = 4
+            not_unique_assigned_boss   = 5
+            no_higher_org_assign_found = 6
+            iteration_error            = 7
+            OTHERS                     = 8.
+
+        IF sy-subrc <> 0.
+          CONTINUE.
+        ENDIF.
+
+        CLEAR: ls_lead_rel, ls_hrpersonee.
+*       order to find Appr based on lead_real_type: D -> D+F -> K -> K+F -> F-EX -> F-AD
+        READ TABLE lt_lead_rel INTO ls_lead_rel WITH KEY lead_rel_type = 'D'.
+        IF sy-subrc <> 0.
+          CLEAR: ls_lead_rel.
+          READ TABLE lt_lead_rel INTO ls_lead_rel WITH KEY lead_rel_type = 'D+F'.
+          IF sy-subrc <> 0.
+            CLEAR: ls_lead_rel.
+            READ TABLE lt_lead_rel INTO ls_lead_rel WITH KEY lead_rel_type = 'K'.
+            IF sy-subrc <> 0.
+              CLEAR: ls_lead_rel.
+              READ TABLE lt_lead_rel INTO ls_lead_rel WITH KEY lead_rel_type = 'K+F'.
+              IF sy-subrc <> 0.
+                CLEAR: ls_lead_rel.
+                READ TABLE lt_lead_rel INTO ls_lead_rel WITH KEY lead_rel_type = 'F-EX'.
+                IF sy-subrc <> 0.
+                  CLEAR: ls_lead_rel.
+                  READ TABLE lt_lead_rel INTO ls_lead_rel WITH KEY lead_rel_type = 'F-AD'.
+                ENDIF.
+              ENDIF.
+            ENDIF.
+          ENDIF.
+        ENDIF.
+        IF ls_lead_rel IS NOT INITIAL.
+          lv_pernr_boss = ls_lead_rel-pernr_boss.
+*         Pernr Boss is available -> get the central pernr
+          CALL FUNCTION 'HR_PERSONEE_GETPERSON'
+            EXPORTING
+              iv_employee_id    = lv_pernr_boss
+              iv_with_authority = ''
+            IMPORTING
+              es_hrpersonee     = ls_hrpersonee.
+
+          IF sy-subrc = 0 AND ls_hrpersonee IS NOT INITIAL.
+            CLEAR: ls_approver, ls_approver_reference, ls_ee_loginid.
+
+            SELECT SINGLE * FROM cte_d_ee_loginid INTO CORRESPONDING FIELDS OF ls_ee_loginid
+              WHERE system_key = '1' AND objid = ls_hrpersonee-employeeid.
+
+*           Add central pernr to BI Manager
+            IF sy-subrc = 0.
+              <fs_ee_bd_data>-enterprise_user_schema-manager-value = ls_ee_loginid-employee_uuid.
+            ENDIF.
+*                    <fs_ee_bd_data>-enterprise_spend_user_schema-bi_manager_struc-employee_number = ls_hrpersonee-employeeid.
+            "        <fs_ee_bd_data>-enterprise_spend_user_schema-bi_manager_struc-value = ls_ee_loginid-employee_uuid.
+
+*           Add central pernr to report and request
+            ls_approver-employee_number = ls_hrpersonee-personid.
+*           fill leading zeros for approver emp id
+            CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT'
+              EXPORTING
+                input  = ls_approver-employee_number
+              IMPORTING
+                output = ls_approver-employee_number.
+
+            ls_approver-value = ls_ee_loginid-employee_uuid.
+            ls_approver_reference-primary = 'X'.
+            ls_approver_reference-approver = ls_approver.
+
+            CLEAR: <fs_ee_bd_data>-spend_approver_schema-report, <fs_ee_bd_data>-spend_approver_schema-request.
+            APPEND ls_approver_reference TO <fs_ee_bd_data>-spend_approver_schema-report.
+            APPEND ls_approver_reference TO <fs_ee_bd_data>-spend_approver_schema-request.
+          ENDIF.
         ENDIF.
       ENDIF.
 
-*     Company Car
-      READ TABLE lt_pa0105
-         WITH KEY pernr = <fs_ee_bd_data>-enterprise_user_schema-employee_number
-         INTO ls_pa0105.
-      READ TABLE <fs_ee_bd_data>-enterprise_spend_user_schema-custom_data WITH KEY id = 'custom1' ASSIGNING <fs_ee_custom>.
-      IF <fs_ee_custom> IS ASSIGNED.
-        IF ls_pa0105-usrid = 'N' OR ls_pa0105-usrid IS INITIAL.
-          <fs_ee_custom>-value = 'N'.
-        ELSE.
-          <fs_ee_custom>-value = 'Y'.
-        ENDIF.
+*     fill leading zeros for emp id
+      IF lv_cen_pernr IS NOT INITIAL.
+        <fs_ee_bd_data>-enterprise_user_schema-employee_number = lv_cen_pernr.
       ENDIF.
 
-*     Roles
+*     assign expense user role and request user role for each emp.
       CLEAR: ls_entitlement, <fs_ee_bd_data>-entitlements.
       ls_entitlement = 'Expense'.
       APPEND ls_entitlement TO <fs_ee_bd_data>-entitlements.
-      ls_entitlement = 'Travel'.
-      APPEND ls_entitlement TO <fs_ee_bd_data>-entitlements.
       ls_entitlement = 'Request'.
       APPEND ls_entitlement TO <fs_ee_bd_data>-entitlements.
-*     add role Invoice User for Sigi
-      IF  <fs_ee_bd_data>-enterprise_user_schema-employee_number = 2.
-        ls_entitlement = 'Invoice'.
+
+*      enhance roll travel user for DE
+      IF <fs_ee_bd_data>-enterprise_spend_user_schema-country = 'DE'.
+*        travel user role
+        ls_entitlement = 'Travel'.
         APPEND ls_entitlement TO <fs_ee_bd_data>-entitlements.
+
+*        ---- travel class ----
+*        default 'Mitarbeiter'
+        <fs_ee_bd_data>-travel_user-rule_class-name = 'Mitarbeiter'.
+        CLEAR: ls_p0001.
+        LOOP AT it_p0001 INTO ls_p0001 WHERE pernr = lv_pernr AND begda <= sy-datum AND endda >= sy-datum.
+*        GB Leitung (Planstelle 00000597, 00000422, 00000645, 00003976)
+          IF ls_p0001-plans = '00000597' "Head of WACKER POLYMERS
+          OR ls_p0001-plans = '00000422' "Head of WACKER BIOSOLUTIONS
+          OR ls_p0001-plans = '00000645' "Head of WACKER SILICONES
+          OR ls_p0001-plans = '00003976'. "Head of WACKER POLYSILICON
+            CLEAR: <fs_ee_bd_data>-travel_user-rule_class-name.
+            <fs_ee_bd_data>-travel_user-rule_class-name = 'GB Leitung'.
+          ENDIF.
+*        Vorstand MA Kreis 10
+          IF ls_p0001-persk = '10'. "OFK-VS-GF
+            CLEAR: <fs_ee_bd_data>-travel_user-rule_class-name.
+            <fs_ee_bd_data>-travel_user-rule_class-name = 'Vorstand'.
+          ENDIF.
+
+*        ---- Org Unit / Division ----
+          CASE ls_p0001-bukrs.
+            WHEN '0104'.
+              <fs_ee_bd_data>-travel_user-org_unit = 'WACKER DE BBIW CT'.
+            WHEN '0150'.
+              <fs_ee_bd_data>-travel_user-org_unit = 'WACKER DE BIOTECH CT'.
+            WHEN '0101'.
+              <fs_ee_bd_data>-travel_user-org_unit = 'WACKER DE CHEMIE CT'.
+            WHEN '0107'.
+              <fs_ee_bd_data>-travel_user-org_unit = 'WACKER DE DRAWIN VERTRIEB CT'.
+            WHEN '0114'.
+              <fs_ee_bd_data>-travel_user-org_unit = 'WACKER DE VERSICHERUNG CT'.
+            WHEN OTHERS.
+              <fs_ee_bd_data>-travel_user-org_unit = ''.
+          ENDCASE.
+*          ---- custom1: Kostl ----
+          REFRESH: <fs_ee_bd_data>-travel_user-custom_fields.
+          CLEAR: ls_custom.
+          ls_custom-name = 'custom1'.
+          ls_custom-value = ls_p0001-kostl.
+          SHIFT ls_custom-value LEFT DELETING LEADING '0'.
+          APPEND ls_custom TO <fs_ee_bd_data>-travel_user-custom_fields.
+
+*          ---- custom2: OrgEinheit Kurztext ----
+          CLEAR: ls_custom, ls_hrp1000.
+          ls_custom-name = 'custom2'.
+          SELECT SINGLE * FROM hrp1000 INTO ls_hrp1000 WHERE objid = ls_p0001-orgeh AND otype = 'O'
+            AND begda <= sy-datum AND endda >= sy-datum.
+          IF sy-subrc = 0.
+            ls_custom-value = ls_hrp1000-short.
+            APPEND ls_custom TO <fs_ee_bd_data>-travel_user-custom_fields.
+          ENDIF.
+
+*          ---- custom3: Personalbereich ----
+          CLEAR: ls_custom.
+          ls_custom-name = 'custom3'.
+          ls_custom-value = ls_p0001-werks.
+          APPEND ls_custom TO <fs_ee_bd_data>-travel_user-custom_fields.
+        ENDLOOP.
+
+*       travel approver, take from request and expense approver
+        IF ls_approver IS NOT INITIAL.
+          <fs_ee_bd_data>-travel_user-manager = ls_approver.
+        ENDIF.
       ENDIF.
 
-      CLEAR: ls_bsxxhr06.
-      READ TABLE lt_bsxxhr06 INTO ls_bsxxhr06 WITH KEY pernr_lead = <fs_ee_bd_data>-enterprise_user_schema-employee_number.
-*     set request approver role if MA is lead
-      IF sy-subrc = 0.
-        CLEAR: ls_role_reference.
-        ls_role_reference-role_name = 'REQ_APPROVER'.
-        APPEND ls_role_reference TO <fs_ee_bd_data>-enterprise_spend_role_schema-roles.
+*      enhance roll travel user for USA
+      IF <fs_ee_bd_data>-enterprise_spend_user_schema-country = 'US'.
+*       ---- travel user role ----
+        ls_entitlement = 'Travel'.
+        APPEND ls_entitlement TO <fs_ee_bd_data>-entitlements.
+
+*        ---- travel class ----
+*        default 'Default Travel Class'
+        <fs_ee_bd_data>-travel_user-rule_class-name = 'Default Travel Class'.
+*        todo VIP
+
+*       travel approver, take from request and expense approver
+        IF ls_approver IS NOT INITIAL.
+          <fs_ee_bd_data>-travel_user-manager = ls_approver.
+        ENDIF.
       ENDIF.
 
+*      enhance roll travel user for MX
+      IF <fs_ee_bd_data>-enterprise_spend_user_schema-country = 'MX'.
+*       ---- travel user role ----
+        ls_entitlement = 'Travel'.
+        APPEND ls_entitlement TO <fs_ee_bd_data>-entitlements.
 
-*     Find the request approver from table /NYX/BSXXHR06
-*      CLEAR: ls_bsxxhr06.
-*      READ TABLE lt_bsxxhr06 INTO ls_bsxxhr06 WITH KEY pernr = <fs_ee_bd_data>-enterprise_user_schema-employee_number.
-*      IF sy-subrc = 0.
-**        lead found, check if lead is active
-*        READ TABLE lt_0000 WITH KEY pernr = ls_bsxxhr06-pernr_lead TRANSPORTING NO FIELDS.
-*        IF sy-subrc = 0.
-**          lead is active, change request approver
-*          CLEAR: ls_approver_reference, <fs_ee_bd_data>-spend_approver_schema-request.
-*          ls_approver_reference-primary = 'X'.
-*          ls_approver_reference-approver-employee_number = ls_bsxxhr06-pernr_lead.
-*          SHIFT ls_approver_reference-approver-employee_number LEFT DELETING LEADING '0'.
-*          APPEND ls_approver_reference TO <fs_ee_bd_data>-spend_approver_schema-request.
-*        ENDIF.
-*      ENDIF.
+*        ---- travel class ----
+*        default 'General WAMEX'
+        <fs_ee_bd_data>-travel_user-rule_class-name = 'General WAMEX'.
+*        todo Managing Director WAMEX
+
+*       travel approver, take from request and expense approver
+        IF ls_approver IS NOT INITIAL.
+          <fs_ee_bd_data>-travel_user-manager = ls_approver.
+        ENDIF.
+      ENDIF.
     ENDLOOP.
-
   ENDMETHOD.
