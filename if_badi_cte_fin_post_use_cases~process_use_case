@@ -1,0 +1,6 @@
+  METHOD if_badi_cte_fin_post_use_cases~process_use_case.
+    IF is_use_case_admin-use_case_id = 'ZHR_SST_EXCL_CC'.
+*   Kosten werden von der Buchung ausgeschlossen, nichts machen
+      RETURN.
+    ENDIF.
+  ENDMETHOD.
