@@ -243,9 +243,11 @@ FORM process_data .
   DATA: ls_log TYPE zhrsst_a1_2.
   DATA: lt_log TYPE TABLE OF zhrsst_a1_2.
   DATA: ls_custom_value TYPE /nyx/sccoreq08v4.
-  DATA lv_rba_email_address TYPE comm_id_long.
-  DATA lv_rba_pernr TYPE pernr_d.
-  DATA ls_pa0105 TYPE pa0105.
+  DATA: lv_rba_email_address TYPE comm_id_long.
+  DATA: lv_rba_pernr TYPE pernr_d.
+  DATA: ls_pa0105 TYPE pa0105.
+  DATA: lv_date TYPE sy-datum.
+  DATA: lv_time TYPE sy-uzeit.
 
   CLEAR: gt_aus_d.
   LOOP AT gt_a1_hdr INTO ls_a1_hdr.
@@ -395,22 +397,9 @@ FORM process_data .
           CONTINUE.
         ENDIF.
 
-* If no entry exists at all => create
-        SELECT SINGLE * FROM zhrsst_a1_2 INTO ls_log WHERE trip_id = ls_aus_d-trip_id AND a1mnr = ls_a1_hdr-a1mnr AND vp_action = 'CREATE'. " Check if the create exists
-        IF sy-subrc <> 0.
-
-          ls_aus_d-tw_status = 'APPROVED'.
-
-          MOVE-CORRESPONDING EXACT ls_aus_d TO ls_log.
-          ls_log-a1mnr = ls_a1_hdr-a1mnr.
-          ls_log-vp_date = ls_a1_hist-date_from.
-          ls_log-vp_time = ls_a1_hist-time_from.
-          ls_log-vp_action = 'CREATE'.
-
-          APPEND ls_log TO gt_log.
-          APPEND ls_aus_d TO gt_aus_d.
-          CONTINUE.
-        ELSE.
+* Check if the change is available
+        SELECT SINGLE * FROM zhrsst_a1_2 INTO ls_log WHERE trip_id = ls_aus_d-trip_id AND a1mnr = ls_a1_hdr-a1mnr AND vp_action = 'CHANGE'. " Check if the change exists
+        IF sy-subrc = 0.
 * Compare with entries
           IF ls_log-zland NE ls_aus_d-zland OR ls_log-datv1 NE ls_aus_d-datv1 OR ls_log-datb1 NE ls_aus_d-datb1
             OR ls_log-ankey NE ls_aus_d-ankey OR ls_log-name NE ls_aus_d-name OR ls_log-stras NE ls_aus_d-stras
@@ -426,8 +415,25 @@ FORM process_data .
 
             APPEND ls_log TO gt_log.
             APPEND ls_aus_d TO gt_aus_d.
-            CONTINUE.
           ENDIF.
+
+          CONTINUE.
+        ENDIF.
+
+* If no entry exists at all => create
+        SELECT SINGLE * FROM zhrsst_a1_2 INTO ls_log WHERE trip_id = ls_aus_d-trip_id AND a1mnr = ls_a1_hdr-a1mnr AND vp_action = 'CREATE'. " Check if the create exists
+        IF sy-subrc <> 0.
+
+          ls_aus_d-tw_status = 'APPROVED'.
+
+          MOVE-CORRESPONDING EXACT ls_aus_d TO ls_log.
+          ls_log-a1mnr = ls_a1_hdr-a1mnr.
+          ls_log-vp_date = ls_a1_hist-date_from.
+          ls_log-vp_time = ls_a1_hist-time_from.
+          ls_log-vp_action = 'CREATE'.
+
+          APPEND ls_log TO gt_log.
+          APPEND ls_aus_d TO gt_aus_d.
         ENDIF.
       ENDLOOP.
 
@@ -457,22 +463,9 @@ FORM process_data .
         CONTINUE.
       ENDIF.
 
-* If no entry exists at all => create
-      SELECT SINGLE * FROM zhrsst_a1_2 INTO ls_log WHERE trip_id = ls_aus_d-trip_id AND a1mnr = ls_a1_hdr-a1mnr AND vp_action = 'CREATE'. " Check if the create exists
-      IF sy-subrc <> 0.
-
-        ls_aus_d-tw_status = 'APPROVED'.
-
-        MOVE-CORRESPONDING EXACT ls_aus_d TO ls_log.
-        ls_log-a1mnr = ls_a1_hdr-a1mnr.
-        ls_log-vp_date = ls_a1_hist-date_from.
-        ls_log-vp_time = ls_a1_hist-time_from.
-        ls_log-vp_action = 'CREATE'.
-
-        APPEND ls_log TO gt_log.
-        APPEND ls_aus_d TO gt_aus_d.
-        CONTINUE.
-      ELSE.
+* Check if the change is available
+      SELECT SINGLE * FROM zhrsst_a1_2 INTO ls_log WHERE trip_id = ls_aus_d-trip_id AND a1mnr = ls_a1_hdr-a1mnr AND vp_action = 'CHANGE'. " Check if the change exists
+      IF sy-subrc = 0.
 * Compare with entries
         IF ls_log-zland NE ls_aus_d-zland OR ls_log-datv1 NE ls_aus_d-datv1 OR ls_log-datb1 NE ls_aus_d-datb1
           OR ls_log-ankey NE ls_aus_d-ankey OR ls_log-name NE ls_aus_d-name OR ls_log-stras NE ls_aus_d-stras
@@ -488,15 +481,33 @@ FORM process_data .
 
           APPEND ls_log TO gt_log.
           APPEND ls_aus_d TO gt_aus_d.
-          CONTINUE.
         ENDIF.
+
+        CONTINUE.
+      ENDIF.
+
+* If no entry exists at all => create
+      SELECT SINGLE * FROM zhrsst_a1_2 INTO ls_log WHERE trip_id = ls_aus_d-trip_id AND a1mnr = ls_a1_hdr-a1mnr AND vp_action = 'CREATE'. " Check if the create exists
+      IF sy-subrc <> 0.
+
+        ls_aus_d-tw_status = 'APPROVED'.
+
+        MOVE-CORRESPONDING EXACT ls_aus_d TO ls_log.
+        ls_log-a1mnr = ls_a1_hdr-a1mnr.
+        ls_log-vp_date = ls_a1_hist-date_from.
+        ls_log-vp_time = ls_a1_hist-time_from.
+        ls_log-vp_action = 'CREATE'.
+
+        APPEND ls_log TO gt_log.
+        APPEND ls_aus_d TO gt_aus_d.
       ENDIF.
     ENDIF.
   ENDLOOP.
 
 
 * Get all the trips of travelers that do not belong to German company code
-  SELECT * FROM zhrsst_a1_2 INTO TABLE lt_log WHERE a1mnr = '' AND vp_date = '' AND vp_time = '' AND vp_action  = ''.
+  CLEAR: lv_date, lv_time.
+  SELECT * FROM zhrsst_a1_2 INTO TABLE lt_log WHERE a1mnr = '' AND vp_date = lv_date AND vp_time = lv_time AND vp_action  = ''.
   MOVE-CORRESPONDING EXACT lt_log TO lt_aus_d.
 
   APPEND LINES OF lt_aus_d TO gt_aus_d.
