@@ -1,0 +1,819 @@
+*&---------------------------------------------------------------------*
+*& Report ZHR_SST_CONCUR_REISEN_IFD
+*&---------------------------------------------------------------------*
+*&
+*&---------------------------------------------------------------------*
+*&
+*&---------------------------------------------------------------------*
+*& Created on: 18.05.2026
+*& Created by: Cuong Luc (neylux GmbH)
+*&
+*& This report lists all the trips with new status CREATE/CHANGE/DELETE
+*& Generate a CSV file and download/upload to local machine/FTP server
+*&---------------------------------------------------------------------*
+REPORT zhr_sst_concur_reisen_ifd_2.
+TABLES pernr.
+
+INFOTYPES: 0001, 0002, 0105.
+*&---------------------------------------------------------------------*
+*&   Data declaration
+*&---------------------------------------------------------------------*
+
+DATA: gt_aus_d TYPE TABLE OF zhr_sst_concur_reisen_output_s.
+DATA: gt_aus_final TYPE TABLE OF zhr_sst_concur_reisen_output_1.
+DATA: gs_selection TYPE zhr_sst_concur_reisen_selectio.
+DATA: gt_a1_hdr TYPE TABLE OF /nyx/a1_hdr.
+DATA: gt_pa0002 TYPE TABLE OF pa0002.
+DATA: gt_hist TYPE TABLE OF /nyx/a1_hist.
+DATA: gt_csv_table TYPE truxs_t_text_data.
+DATA: gv_filepath TYPE string.
+DATA: gv_action TYPE /nyx/a1_sync_action_vp.
+DATA: gt_log TYPE TABLE OF zhrsst_a1_2.
+DATA: gt_sst_2 TYPE TABLE OF zhrsst_a1_2.
+TYPES gty_data TYPE c LENGTH 4096.
+DATA: gt_a1_hist TYPE TABLE OF /nyx/a1_hist.
+
+*&---------------------------------------------------------------------*
+*&   SELECTION-SCREEN
+*&---------------------------------------------------------------------*
+SELECTION-SCREEN BEGIN OF BLOCK a1 WITH FRAME TITLE TEXT-001.
+SELECT-OPTIONS: s_natio  FOR gs_selection-natio NO INTERVALS. "PA0002
+SELECT-OPTIONS: s_req_nr FOR gs_selection-trip_request_nr NO INTERVALS.   "Request ID
+SELECT-OPTIONS: s_land  FOR gs_selection-zland NO INTERVALS.
+
+PARAMETERS: p_begda TYPE begda OBLIGATORY DEFAULT sy-datum.
+PARAMETERS: p_endda  TYPE endda OBLIGATORY DEFAULT sy-datum.
+SELECT-OPTIONS: s_twstat  FOR gs_selection-tw_status NO INTERVALS. "scco02
+SELECTION-SCREEN END OF BLOCK a1.
+
+SELECTION-SCREEN BEGIN OF BLOCK a2 WITH FRAME TITLE TEXT-002.
+PARAMETERS p_filen TYPE text256 OBLIGATORY DEFAULT 'SST_Deloitte_<DATE>_<TIME>.csv'.
+PARAMETERS p_as TYPE char1 RADIOBUTTON GROUP rbg1 USER-COMMAND us DEFAULT 'X'.
+PARAMETERS p_asp TYPE ys_ftpfile MODIF ID 001. " YSTRANSP-LFILENAME, OBLIGATORY DEFAULT 'C:\temp' .
+PARAMETERS p_modul  TYPE ys_modulnm DEFAULT 'HR-SF' MODIF ID 001. " YSTRANSP-MODULNAME
+PARAMETERS p_lm TYPE char1 RADIOBUTTON GROUP rbg1 .
+PARAMETERS p_lmp TYPE string DEFAULT 'C:\' MODIF ID 002 ."Source file name
+PARAMETERS p_seprat TYPE char1 DEFAULT ','.
+SELECTION-SCREEN END OF BLOCK a2.
+
+SELECTION-SCREEN BEGIN OF BLOCK a3 WITH FRAME TITLE TEXT-003.
+PARAMETERS p_test AS CHECKBOX DEFAULT 'X'.
+SELECTION-SCREEN END OF BLOCK a3.
+
+*--------------------------------------------------------------------*
+INITIALIZATION.
+*--------------------------------------------------------------------*
+  AUTHORITY-CHECK OBJECT 'S_TCODE'                    "#EC CI_A086_0001
+           ID 'TCD' FIELD 'ZHR_A1_CSV'.
+  IF sy-subrc NE 0.
+    MESSAGE e059(eu) WITH 'ZHR_A1_CSV'.  " no authority
+  ENDIF.
+
+*  CONCATENATE 'SST_Deloitte_' sy-datum '_' sy-uzeit '.csv' INTO p_filen.
+*  CONCATENATE '/' sy-sysid '_R3WRITE/hr-sf/' p_filen INTO p_asp.
+
+AT SELECTION-SCREEN OUTPUT .
+  LOOP AT SCREEN.
+    IF p_as IS NOT INITIAL."Save to application server
+      IF screen-group1 = '001' .
+        screen-active = 1.
+*        screen-required = 1.
+        MODIFY SCREEN.
+      ENDIF.
+      IF screen-group1 = '002'.
+        screen-active = 0.
+*        screen-required = 0.
+        MODIFY SCREEN.
+      ENDIF.
+    ENDIF.
+    IF p_lm IS NOT INITIAL."Physical File Path
+*     If physical file path option is selected then adjust the selection screen
+      IF screen-group1 = '001' .
+        screen-active = 0.
+*        screen-required = 0.
+        MODIFY SCREEN.
+      ENDIF.
+      IF screen-group1 = '002'.
+*        screen-required = 1.
+        screen-active = 1.
+        MODIFY SCREEN.
+      ENDIF.
+    ENDIF.
+  ENDLOOP.
+
+AT SELECTION-SCREEN ON VALUE-REQUEST FOR p_lmp.
+  TRY.
+      CALL METHOD cl_gui_frontend_services=>directory_browse
+        EXPORTING
+          window_title    = 'Folder Directory'
+          initial_folder  = 'C:'
+        CHANGING
+          selected_folder = p_lmp.
+    CATCH cx_root INTO DATA(lx_error).
+
+  ENDTRY.
+
+* --- START of SELECTION -----------------------------------------------
+START-OF-SELECTION.
+* Create a new object
+GET pernr.
+
+  PERFORM get_data.
+  PERFORM process_data.
+
+
+END-OF-SELECTION.
+
+  PERFORM generate_csv.
+  PERFORM download_csv.
+  PERFORM save_data.
+** --- End of Selection -------------------------------------------------
+*&---------------------------------------------------------------------*
+*&      Form  FETCH_DATA
+*&---------------------------------------------------------------------*
+*       Fetch the data from database table
+*----------------------------------------------------------------------*
+FORM get_data .
+  DATA: lt_a1_hdr TYPE TABLE OF /nyx/a1_hdr.
+  DATA: ls_a1_hdr TYPE /nyx/a1_hdr.
+  DATA: ls_a1_hist TYPE /nyx/a1_hist.
+  DATA: ls_pa0002 TYPE pa0002.
+  DATA: ls_tr_header TYPE /nyx/sccoreq02v4.
+  DATA: ls_sccoreq21v4 TYPE /nyx/sccoreq21v4.
+  DATA: lt_a1_hist_tmp TYPE TABLE OF /nyx/a1_hist.
+  DATA lv_lines TYPE i.
+
+* Get the 'SAVED_0700' trips from /nyx/a1_hdr
+  SELECT * FROM /nyx/a1_hdr                   "#EC CI_ALL_FIELDS_NEEDED
+  INTO TABLE gt_a1_hdr WHERE begda >= p_begda AND endda <= p_endda
+                             AND pernr = pernr. "#EC "#EC CI_NOFIELD "#EC CI_NOWHERE
+
+  SELECT * FROM /nyx/a1_hist                  "#EC CI_ALL_FIELDS_NEEDED
+  INTO TABLE gt_a1_hist WHERE begda >= p_begda AND endda <= p_endda
+                             AND pernr = pernr. "#EC "#EC CI_NOFIELD "#EC CI_NOWHERE
+
+  SELECT * FROM zhrsst_a1_2                   "#EC CI_ALL_FIELDS_NEEDED
+  INTO TABLE gt_sst_2 WHERE datv1 >= p_begda AND datb1 <= p_endda
+                              AND pernr = pernr. "#EC "#EC CI_NOFIELD "#EC CI_NOWHERE
+
+* Delete entries not in s_land
+  IF s_land IS NOT INITIAL.
+    DELETE gt_a1_hdr WHERE land NOT IN s_land.
+    DELETE gt_a1_hist WHERE land NOT IN s_land.
+  ENDIF.
+
+  SORT gt_a1_hist BY a1mnr ASCENDING prtnr DESCENDING.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  PROCESS_DATA
+*&---------------------------------------------------------------------*
+*       Filtern the data based on selections and parameters and process data
+*----------------------------------------------------------------------*
+FORM process_data .
+  DATA: ls_a1_hdr TYPE /nyx/a1_hdr.
+  DATA: ls_tr_header TYPE /nyx/sccoreq02v4.
+  DATA: ls_aus_d     TYPE zhr_sst_concur_reisen_output_s.
+  DATA: lt_aus_d     TYPE TABLE OF zhr_sst_concur_reisen_output_s.
+  DATA: ls_a1_dest TYPE /nyx/a1_dest.
+  DATA: lt_a1_dest TYPE TABLE OF /nyx/a1_dest.
+  DATA: ls_persparm TYPE fpb_persparm.
+  DATA: lv_pernr TYPE pernr_d.
+  DATA: lv_uname TYPE uname.
+  DATA: ls_sccoreq21v4 TYPE /nyx/sccoreq21v4.
+  DATA: ls_pa0001 TYPE pa0001.
+  DATA: lv_trip_id TYPE /nyx/sc_co_req_legid_v04.
+  DATA: ls_a1_hist TYPE /nyx/a1_hist.
+  DATA: ls_a1_hist_tmp TYPE /nyx/a1_hist.
+  DATA: lt_a1_hist_tmp TYPE TABLE OF /nyx/a1_hist.
+  DATA: ls_a1_hist_delete TYPE /nyx/a1_hist.
+  DATA: ls_log TYPE zhrsst_a1_2.
+  DATA: ls_sst_2_old TYPE zhrsst_a1_2.
+  DATA: lt_log TYPE TABLE OF zhrsst_a1_2.
+  DATA: ls_custom_value TYPE /nyx/sccoreq08v4.
+  DATA: lv_rba_email_address TYPE comm_id_long.
+  DATA: lv_rba_pernr TYPE pernr_d.
+  DATA: ls_pa0105 TYPE pa0105.
+  DATA: lv_date TYPE sy-datum.
+  DATA: lv_time TYPE sy-uzeit.
+  DATA lv_lines TYPE i.
+
+  LOOP AT gt_a1_hist INTO ls_a1_hist.
+    IF ls_a1_hist-a1mnr = ls_a1_hist_tmp-a1mnr.
+      CONTINUE.
+    ENDIF.
+    CLEAR: lt_a1_hist_tmp.
+    lt_a1_hist_tmp = gt_a1_hist.
+    DELETE lt_a1_hist_tmp WHERE a1mnr <> ls_a1_hist-a1mnr.
+    SORT lt_a1_hist_tmp BY prtnr DESCENDING.
+    READ TABLE lt_a1_hist_tmp INTO ls_a1_hist_tmp INDEX 1.
+    CASE ls_a1_hist_tmp-status.
+      WHEN 'SAVED_0700'.
+*       TRIP_ID
+        READ TABLE gt_a1_hdr INTO ls_a1_hdr WITH KEY a1mnr = ls_a1_hist-a1mnr.
+        IF ls_a1_hdr-customer01 IS INITIAL.
+*          if this field is empty, this A1 doesn't come from Concur
+          CONTINUE.
+        ENDIF.
+        ls_aus_d-trip_id = ls_a1_hdr-customer01. "docid segmendid
+
+*        PERNR
+        ls_aus_d-pernr = ls_a1_hist-pernr.
+
+*       check if we ever created this trip
+        CLEAR: lv_lines, ls_sst_2_old.
+        READ TABLE gt_sst_2 INTO ls_sst_2_old WITH KEY a1mnr = ls_a1_hdr-a1mnr vp_action = 'CREATE'.
+        DESCRIBE TABLE lt_a1_hist_tmp LINES lv_lines.
+        IF lv_lines = 2.
+*        new trip created from job, do not have any change
+*        check if we already processed
+          IF ls_sst_2_old IS NOT INITIAL.
+*          already created, ignore
+            CONTINUE.
+          ENDIF.
+        ENDIF.
+*        till here, we have either CREATE or CHANGE
+        IF ls_sst_2_old IS NOT INITIAL.
+          MOVE-CORRESPONDING ls_sst_2_old TO ls_aus_d.
+        ENDIF.
+
+        IF ls_sst_2_old-pernr_rba IS NOT INITIAL.
+        ENDIF.
+      WHEN 'DELETED'.
+
+      WHEN OTHERS.
+    ENDCASE.
+  ENDLOOP.
+
+
+  CLEAR: gt_aus_d.
+  LOOP AT gt_a1_hdr INTO ls_a1_hdr.
+    CLEAR: ls_aus_d, ls_log.
+
+    ls_aus_d-pernr = ls_a1_hdr-pernr.
+    IF ls_a1_hdr-customer01 IS INITIAL.
+*      this field contain <docid><segmentid>, if it is empty, this A1 does not come from Concur
+      CONTINUE.
+    ENDIF.
+*    SELECT SINGLE * FROM /nyx/sccoreq21v4 INTO ls_sccoreq21v4 WHERE proc_value = ls_a1_hdr-a1mnr.
+*    IF sy-subrc <> 0.
+*      CONTINUE.
+*    ENDIF.
+*
+*    SELECT SINGLE * FROM /nyx/sccoreq02v4 INTO ls_tr_header WHERE doc_id = ls_sccoreq21v4-doc_id. "#EC CI_ALL_FIELDS_NEEDED
+*    IF sy-subrc <> 0.
+*      CONTINUE.
+*    ENDIF.
+*
+*    CONCATENATE ls_tr_header-requestid ls_sccoreq21v4-segmentlegid INTO ls_aus_d-trip_id.
+    ls_aus_d-trip_id = ls_a1_hdr-customer01.
+
+* todo: replace select PA with FuMo HR Read Infotype
+    SELECT SINGLE * FROM pa0001 INTO ls_pa0001 WHERE pernr = ls_a1_hdr-pernr AND begda <= sy-datum AND endda >= sy-datum.
+    IF sy-subrc <> 0.
+      CONTINUE.
+    ENDIF.
+
+    ls_aus_d-fdf_kostl_pernr = ls_pa0001-kostl.
+
+********************************************************************************
+* 09/2026: Get the RBA pernr from Concur
+********************************************************************************
+
+*    CLEAR: ls_custom_value.
+*    SELECT SINGLE * FROM /nyx/sccoreq08v4 INTO ls_custom_value
+*      WHERE
+*         doc_id = ls_tr_header-doc_id AND
+*         time_stamp = ls_tr_header-time_stamp AND
+*         customfieldname = 'CUSTOM5'.
+
+    IF sy-subrc = 0.
+      CLEAR: lv_rba_pernr.
+      lv_rba_email_address = ls_a1_hdr-assistant_email.
+
+* todo: replace select PA with FuMo HR Read Infotype
+      SELECT SINGLE * FROM pa0105 INTO ls_pa0105
+        WHERE
+          subty = '0010' AND
+          begda <= sy-datum AND
+          endda >= sy-datum AND
+          usrid_long = lv_rba_email_address.
+
+      IF sy-subrc = 0.
+        lv_rba_pernr = ls_pa0105-pernr.
+      ENDIF.
+    ENDIF.
+
+    IF lv_rba_pernr IS NOT INITIAL.
+* Input from Concur available
+      ls_aus_d-pernr_rba = lv_rba_pernr.
+    ELSE.
+* Find the RBA for traveller from fpb_persparm
+      SELECT SINGLE * FROM fpb_persparm INTO ls_persparm "#EC CI_ALL_FIELDS_NEEDED
+        WHERE
+          low = ls_aus_d-pernr AND                        "#EC CI_SUBRC
+          applid = 'CO-CCA-TR' AND
+      fieldname = 'PERNR'.                         "#EC "#EC CI_NOFIRST
+
+      IF sy-subrc = 0.
+*   Get Pernr from User
+        lv_uname = ls_persparm-perskey.
+        CALL FUNCTION 'BAPI_USR01DOHR_GETEMPLOYEE'
+          EXPORTING
+            id             = lv_uname
+          IMPORTING
+*           return         = ls_return
+            employeenumber = lv_pernr.
+
+        IF sy-subrc = 0.
+          ls_aus_d-pernr_rba = lv_pernr.
+        ENDIF.
+      ENDIF.
+    ENDIF.
+
+*   Read data from hist table
+    CLEAR: lt_a1_hist_tmp.
+    lt_a1_hist_tmp = gt_a1_hist.
+
+    SELECT SINGLE * FROM /nyx/a1_hist INTO ls_a1_hist WHERE pernr = ls_a1_hdr-pernr AND a1mnr = ls_a1_hdr-a1mnr AND status = 'SAVED_0700'. "#EC CI_ALL_FIELDS_NEEDED
+    IF sy-subrc = 0.
+      ls_aus_d-zland = ls_a1_hdr-land.
+      ls_aus_d-datv1 = ls_a1_hist-begda.
+      ls_aus_d-datb1 = ls_a1_hist-endda.
+      ls_aus_d-dates = ls_a1_hist-date_from.
+      ls_aus_d-times = ls_a1_hist-time_from.
+    ENDIF.
+
+* Read destinations
+    SELECT * FROM /nyx/a1_dest INTO TABLE lt_a1_dest WHERE pernr = ls_a1_hdr-pernr AND a1mnr = ls_a1_hdr-a1mnr.
+    IF sy-subrc = 0.
+      SORT lt_a1_dest BY bsnr ASCENDING.
+      lv_trip_id = ls_aus_d-trip_id.
+      LOOP AT lt_a1_dest INTO ls_a1_dest.
+        CASE sy-tabix.
+          WHEN 1.
+            CONCATENATE lv_trip_id '1ST' INTO ls_aus_d-trip_id.
+          WHEN 2.
+            CONCATENATE lv_trip_id '2ND' INTO ls_aus_d-trip_id.
+          WHEN 3.
+            CONCATENATE lv_trip_id '3RD' INTO ls_aus_d-trip_id.
+          WHEN 4.
+            CONCATENATE lv_trip_id '4TH' INTO ls_aus_d-trip_id.
+          WHEN 5.
+            CONCATENATE lv_trip_id '5TH' INTO ls_aus_d-trip_id.
+          WHEN 6.
+            CONCATENATE lv_trip_id '6TH' INTO ls_aus_d-trip_id.
+          WHEN 7.
+            CONCATENATE lv_trip_id '7TH' INTO ls_aus_d-trip_id.
+          WHEN 8.
+            CONCATENATE lv_trip_id '8TH' INTO ls_aus_d-trip_id.
+          WHEN 9.
+            CONCATENATE lv_trip_id '9TH' INTO ls_aus_d-trip_id.
+          WHEN 10.
+            CONCATENATE lv_trip_id '10TH' INTO ls_aus_d-trip_id.
+          WHEN 11.
+            CONCATENATE lv_trip_id '11TH' INTO ls_aus_d-trip_id.
+          WHEN OTHERS.
+        ENDCASE.
+        ls_aus_d-ankey = ls_a1_dest-t536c_key_bs.
+        ls_aus_d-name = ls_a1_dest-name_bs.
+        ls_aus_d-stras = ls_a1_dest-strasse_bs.
+        ls_aus_d-hausn = ls_a1_dest-hausnr_bs.
+        ls_aus_d-plz = ls_a1_dest-plz_bs.
+        ls_aus_d-ort = ls_a1_dest-ort_bs.
+
+* If the entry exists with the status DELETE => remove
+        SELECT SINGLE * FROM zhrsst_a1_2 INTO ls_log WHERE trip_id = ls_aus_d-trip_id AND a1mnr = ls_a1_hdr-a1mnr AND vp_action = 'DELETE'.
+        IF sy-subrc = 0.
+          CONTINUE.
+        ENDIF.
+
+* If there was a entry in /nyx/a1_hist with the status DELETED
+        SELECT SINGLE * FROM /nyx/a1_hist INTO ls_a1_hist_delete WHERE pernr = ls_aus_d-pernr AND a1mnr = ls_a1_hdr-a1mnr AND status = 'DELETED'.
+        IF sy-subrc = 0.
+          ls_aus_d-tw_status = 'CANCEL'.
+
+          MOVE-CORRESPONDING EXACT ls_aus_d TO ls_log.
+          ls_log-a1mnr = ls_a1_hdr-a1mnr.
+          ls_log-vp_date = ls_a1_hist_delete-date_from.
+          ls_log-vp_time = ls_a1_hist_delete-time_from.
+          ls_log-vp_action = 'DELETE'.
+
+          APPEND ls_log TO gt_log.
+          APPEND ls_aus_d TO gt_aus_d.
+          CONTINUE.
+        ENDIF.
+
+* Check if the change is available
+        SELECT SINGLE * FROM zhrsst_a1_2 INTO ls_log WHERE trip_id = ls_aus_d-trip_id AND a1mnr = ls_a1_hdr-a1mnr AND vp_action = 'CHANGE'. " Check if the change exists
+        IF sy-subrc = 0.
+* Compare with entries
+          IF ls_log-zland NE ls_aus_d-zland OR ls_log-datv1 NE ls_aus_d-datv1 OR ls_log-datb1 NE ls_aus_d-datb1
+            OR ls_log-ankey NE ls_aus_d-ankey OR ls_log-name NE ls_aus_d-name OR ls_log-stras NE ls_aus_d-stras
+            OR ls_log-hausn NE ls_aus_d-hausn OR ls_log-plz NE ls_aus_d-plz OR ls_log-ort NE ls_aus_d-ort.
+
+            ls_aus_d-tw_status = 'APPROVED'.
+
+            MOVE-CORRESPONDING EXACT ls_aus_d TO ls_log.
+            ls_log-a1mnr = ls_a1_hdr-a1mnr.
+            ls_log-vp_date = ls_a1_hist-date_from.
+            ls_log-vp_time = ls_a1_hist-time_from.
+            ls_log-vp_action = 'CHANGE'.
+
+            APPEND ls_log TO gt_log.
+            APPEND ls_aus_d TO gt_aus_d.
+          ENDIF.
+
+          CONTINUE.
+        ENDIF.
+
+* If no entry exists at all => create
+        SELECT SINGLE * FROM zhrsst_a1_2 INTO ls_log WHERE trip_id = ls_aus_d-trip_id AND a1mnr = ls_a1_hdr-a1mnr AND vp_action = 'CREATE'. " Check if the create exists
+        IF sy-subrc <> 0.
+
+          ls_aus_d-tw_status = 'APPROVED'.
+
+          MOVE-CORRESPONDING EXACT ls_aus_d TO ls_log.
+          ls_log-a1mnr = ls_a1_hdr-a1mnr.
+          ls_log-vp_date = ls_a1_hist-date_from.
+          ls_log-vp_time = ls_a1_hist-time_from.
+          ls_log-vp_action = 'CREATE'.
+
+          APPEND ls_log TO gt_log.
+          APPEND ls_aus_d TO gt_aus_d.
+        ELSE.     " CREATE already exists, check the change
+* Compare with entries
+          IF ls_log-zland NE ls_aus_d-zland OR ls_log-datv1 NE ls_aus_d-datv1 OR ls_log-datb1 NE ls_aus_d-datb1
+            OR ls_log-ankey NE ls_aus_d-ankey OR ls_log-name NE ls_aus_d-name OR ls_log-stras NE ls_aus_d-stras
+            OR ls_log-hausn NE ls_aus_d-hausn OR ls_log-plz NE ls_aus_d-plz OR ls_log-ort NE ls_aus_d-ort.
+
+            ls_aus_d-tw_status = 'APPROVED'.
+
+            MOVE-CORRESPONDING EXACT ls_aus_d TO ls_log.
+            ls_log-a1mnr = ls_a1_hdr-a1mnr.
+            ls_log-vp_date = ls_a1_hist-date_from.
+            ls_log-vp_time = ls_a1_hist-time_from.
+            ls_log-vp_action = 'CHANGE'.
+
+            APPEND ls_log TO gt_log.
+            APPEND ls_aus_d TO gt_aus_d.
+          ENDIF.
+
+          CONTINUE.
+        ENDIF.
+      ENDLOOP.
+
+    ELSE.
+* No destinations available
+      CONCATENATE ls_aus_d-trip_id '1ST' INTO ls_aus_d-trip_id.
+
+* If the entry exists with the status DELETE => remove
+      SELECT SINGLE * FROM zhrsst_a1_2 INTO ls_log WHERE trip_id = ls_aus_d-trip_id AND a1mnr = ls_a1_hdr-a1mnr AND vp_action = 'DELETE'.
+      IF sy-subrc = 0.
+        CONTINUE.
+      ENDIF.
+
+* If there was a entry in /nyx/a1_hist with the status DELETED
+      SELECT SINGLE * FROM /nyx/a1_hist INTO ls_a1_hist_delete WHERE pernr = ls_aus_d-pernr AND a1mnr = ls_a1_hdr-a1mnr AND status = 'DELETED'.
+      IF sy-subrc = 0.
+        ls_aus_d-tw_status = 'CANCEL'.
+
+        MOVE-CORRESPONDING EXACT ls_aus_d TO ls_log.
+        ls_log-a1mnr = ls_a1_hdr-a1mnr.
+        ls_log-vp_date = ls_a1_hist_delete-date_from.
+        ls_log-vp_time = ls_a1_hist_delete-time_from.
+        ls_log-vp_action = 'DELETE'.
+
+        APPEND ls_log TO gt_log.
+        APPEND ls_aus_d TO gt_aus_d.
+        CONTINUE.
+      ENDIF.
+
+* Check if the change is available
+      SELECT SINGLE * FROM zhrsst_a1_2 INTO ls_log WHERE trip_id = ls_aus_d-trip_id AND a1mnr = ls_a1_hdr-a1mnr AND vp_action = 'CHANGE'. " Check if the change exists
+      IF sy-subrc = 0.
+* Compare with entries
+        IF ls_log-zland NE ls_aus_d-zland OR ls_log-datv1 NE ls_aus_d-datv1 OR ls_log-datb1 NE ls_aus_d-datb1
+          OR ls_log-ankey NE ls_aus_d-ankey OR ls_log-name NE ls_aus_d-name OR ls_log-stras NE ls_aus_d-stras
+          OR ls_log-hausn NE ls_aus_d-hausn OR ls_log-plz NE ls_aus_d-plz OR ls_log-ort NE ls_aus_d-ort.
+
+          ls_aus_d-tw_status = 'APPROVED'.
+
+          MOVE-CORRESPONDING EXACT ls_aus_d TO ls_log.
+          ls_log-a1mnr = ls_a1_hdr-a1mnr.
+          ls_log-vp_date = ls_a1_hist-date_from.
+          ls_log-vp_time = ls_a1_hist-time_from.
+          ls_log-vp_action = 'CHANGE'.
+
+          APPEND ls_log TO gt_log.
+          APPEND ls_aus_d TO gt_aus_d.
+        ENDIF.
+
+        CONTINUE.
+      ENDIF.
+
+* If no entry exists at all => create
+      SELECT SINGLE * FROM zhrsst_a1_2 INTO ls_log WHERE trip_id = ls_aus_d-trip_id AND a1mnr = ls_a1_hdr-a1mnr AND vp_action = 'CREATE'. " Check if the create exists
+      IF sy-subrc <> 0.
+
+        ls_aus_d-tw_status = 'APPROVED'.
+
+        MOVE-CORRESPONDING EXACT ls_aus_d TO ls_log.
+        ls_log-a1mnr = ls_a1_hdr-a1mnr.
+        ls_log-vp_date = ls_a1_hist-date_from.
+        ls_log-vp_time = ls_a1_hist-time_from.
+        ls_log-vp_action = 'CREATE'.
+
+        APPEND ls_log TO gt_log.
+        APPEND ls_aus_d TO gt_aus_d.
+      ELSE.           " CREATE already exists, check the change
+* Compare with entries
+        IF ls_log-zland NE ls_aus_d-zland OR ls_log-datv1 NE ls_aus_d-datv1 OR ls_log-datb1 NE ls_aus_d-datb1
+          OR ls_log-ankey NE ls_aus_d-ankey OR ls_log-name NE ls_aus_d-name OR ls_log-stras NE ls_aus_d-stras
+          OR ls_log-hausn NE ls_aus_d-hausn OR ls_log-plz NE ls_aus_d-plz OR ls_log-ort NE ls_aus_d-ort.
+
+          ls_aus_d-tw_status = 'APPROVED'.
+
+          MOVE-CORRESPONDING EXACT ls_aus_d TO ls_log.
+          ls_log-a1mnr = ls_a1_hdr-a1mnr.
+          ls_log-vp_date = ls_a1_hist-date_from.
+          ls_log-vp_time = ls_a1_hist-time_from.
+          ls_log-vp_action = 'CHANGE'.
+
+          APPEND ls_log TO gt_log.
+          APPEND ls_aus_d TO gt_aus_d.
+        ENDIF.
+
+        CONTINUE.
+      ENDIF.
+    ENDIF.
+  ENDLOOP.
+
+
+* Get all the trips of travelers that do not belong to German company code
+  CLEAR: lv_date, lv_time.
+  SELECT * FROM zhrsst_a1_2 INTO TABLE lt_log WHERE a1mnr = '' AND vp_date = lv_date AND vp_time = lv_time AND vp_action  = ''.
+  MOVE-CORRESPONDING EXACT lt_log TO lt_aus_d.
+
+  APPEND LINES OF lt_aus_d TO gt_aus_d.
+
+* Add vp details to log
+  LOOP AT lt_log INTO ls_log.
+    ls_log-vp_date = sy-datum.
+    ls_log-vp_time = sy-uzeit.
+    ls_log-vp_action = 'CREATE'.
+
+    APPEND ls_log TO gt_log.
+  ENDLOOP.
+ENDFORM.
+
+*&---------------------------------------------------------------------*
+*&      Form  GENERATE_CSV
+*&---------------------------------------------------------------------*
+*       Generate csv file from fetched data
+*----------------------------------------------------------------------*
+FORM generate_csv .
+  DATA: ls_aus_d TYPE zhr_sst_concur_reisen_output_s.
+  DATA: ls_aus_final TYPE zhr_sst_concur_reisen_output_1.
+  DATA: ls_csv_row TYPE LINE OF truxs_t_text_data.
+  FIELD-SYMBOLS: <fs_csv_row>.
+
+  CLEAR: gt_aus_final.
+  LOOP AT gt_aus_d INTO ls_aus_d.
+    CLEAR: ls_aus_final.
+    CONCATENATE '"' ls_aus_d-trip_id '"' INTO ls_aus_final-trip_id.
+    CONCATENATE '"' ls_aus_d-pernr '"' INTO ls_aus_final-pernr.
+    CONCATENATE '"' ls_aus_d-pernr_rba '"' INTO ls_aus_final-pernr_rba.
+    CONCATENATE '"' ls_aus_d-zland '"' INTO ls_aus_final-zland.
+    CONCATENATE '"' ls_aus_d-datv1 '"' INTO ls_aus_final-datv1.
+    CONCATENATE '"' ls_aus_d-datb1 '"' INTO ls_aus_final-datb1.
+    CONCATENATE '"' ls_aus_d-dates '"' INTO ls_aus_final-dates.
+    CONCATENATE '"' ls_aus_d-times '"' INTO ls_aus_final-times.
+    CONCATENATE '"' ls_aus_d-ankey '"' INTO ls_aus_final-ankey.
+    CONCATENATE '"' ls_aus_d-name '"' INTO ls_aus_final-name.
+    CONCATENATE '"' ls_aus_d-stras '"' INTO ls_aus_final-stras.
+    CONCATENATE '"' ls_aus_d-hausn '"' INTO ls_aus_final-hausn.
+    CONCATENATE '"' ls_aus_d-plz '"' INTO ls_aus_final-plz.
+    CONCATENATE '"' ls_aus_d-ort '"' INTO ls_aus_final-ort.
+    CONCATENATE '"' ls_aus_d-tw_status '"' INTO ls_aus_final-tw_status.
+    CONCATENATE '"' ls_aus_d-fdf_kostl_pernr '"' INTO ls_aus_final-fdf_kostl_pernr.
+    CONCATENATE '"' ls_aus_d-fdf_aufnr_trip '"' INTO ls_aus_final-fdf_aufnr_trip.
+
+    APPEND ls_aus_final TO gt_aus_final.
+  ENDLOOP.
+
+  CALL FUNCTION 'SAP_CONVERT_TO_TEX_FORMAT'
+    EXPORTING
+      i_field_seperator    = p_seprat
+    TABLES
+      i_tab_sap_data       = gt_aus_final
+    CHANGING
+      i_tab_converted_data = gt_csv_table
+    EXCEPTIONS
+      conversion_failed    = 4.
+
+  IF sy-subrc <> 0.
+    MESSAGE ID 'ZHR_SST_CONCUR_MC' TYPE 'E' NUMBER 002.
+    STOP.
+  ENDIF.
+
+  ls_csv_row = 'TRIP_ID,PERNR,PERNR_RBA,ZLAND,DATV1,DATB1,DATES,TIMES,ANKEY,NAME,STRAS,HAUSN,PLZ,ORT,TW_STATUS,FDF_KOSTL_PERNR,FDF_AUFNR_TRIP'.
+  INSERT ls_csv_row INTO gt_csv_table INDEX 1.
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  DOWNLOAD_CSV
+*&---------------------------------------------------------------------*
+*       Perform download based on the selection screen
+*----------------------------------------------------------------------*
+FORM download_csv .
+  DATA: ls_aus_d LIKE LINE OF gt_aus_d.
+
+  IF p_test IS INITIAL. " productive mode
+    IF lines( gt_csv_table ) > 1.
+* Download the csv file
+      IF p_lm IS NOT INITIAL.                       " Download to local machine
+        PERFORM download_csv_lm.
+      ELSE.                                         " Save to AL11
+        PERFORM write_data_ftp.
+      ENDIF.
+    ELSE.
+      WRITE: TEXT-006, /.
+    ENDIF.
+  ELSE.
+    WRITE: TEXT-007, /.
+  ENDIF.
+
+  PERFORM print_output.
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  DOWNLOAD_CSV_LM
+*&---------------------------------------------------------------------*
+*       Download the csv file to local machine
+*----------------------------------------------------------------------*
+FORM download_csv_lm .
+  FIELD-SYMBOLS: <fs_csv> LIKE LINE OF gt_csv_table.
+
+  IF p_filen = 'SST_Deloitte_<DATE>_<TIME>.csv'.
+    CONCATENATE 'SST_Deloitte_' sy-datum '_' sy-uzeit '.csv' INTO p_filen.
+  ENDIF.
+
+  CONCATENATE p_lmp '\' p_filen INTO gv_filepath.
+
+* Eliminate tab symbols from internal table
+  LOOP AT gt_csv_table ASSIGNING <fs_csv>.
+    IF <fs_csv> CS cl_abap_char_utilities=>horizontal_tab.
+      REPLACE ALL OCCURRENCES OF cl_abap_char_utilities=>horizontal_tab IN <fs_csv> WITH ''.
+    ENDIF.
+  ENDLOOP.
+* Save the file on local machine
+  CALL FUNCTION 'GUI_DOWNLOAD'
+    EXPORTING
+      filename = gv_filepath
+    TABLES
+      data_tab = gt_csv_table.
+
+  IF sy-subrc <> 0.
+    MESSAGE ID 'ZHR_SST_CONCUR_MC' TYPE 'E' NUMBER 001.
+  ELSE.
+    WRITE: TEXT-004, /.
+  ENDIF.
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  PRINT_OUTPUT
+*&---------------------------------------------------------------------*
+*       Print CSV file content from table gt_csv_table
+*----------------------------------------------------------------------*
+FORM print_output .
+  DATA: ls_csv LIKE LINE OF gt_csv_table.
+  LOOP AT gt_csv_table INTO ls_csv.
+    WRITE: ls_csv.
+  ENDLOOP.
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  SAVE_TO_AS
+*&---------------------------------------------------------------------*
+*       Save the csv file to application server in AL11
+*----------------------------------------------------------------------*
+*FORM save_to_as .
+*  DATA: ls_csv LIKE LINE OF gt_csv_table.
+*
+*  OPEN DATASET gv_filepath FOR OUTPUT IN TEXT MODE ENCODING UTF-8 WITH WINDOWS LINEFEED.
+*  IF sy-subrc <> 0.
+*    MESSAGE ID 'ZHR_SST_CONCUR_MC' TYPE 'E' NUMBER 002.
+*  ENDIF.
+*  LOOP AT gt_csv_table INTO ls_csv.
+*    TRANSFER ls_csv TO gv_filepath.
+*  ENDLOOP.
+*
+*  CLOSE DATASET gv_filepath.
+*ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  SAVE_DATA
+*&---------------------------------------------------------------------*
+*       Save/Update/Delete entries from table ZHRSST_A1_2
+*----------------------------------------------------------------------*
+FORM save_data .
+  DATA: ls_log LIKE LINE OF gt_log.
+  DATA: lv_message TYPE bapi_msg.
+
+  IF p_test IS INITIAL.
+*TODO: Update the table
+    LOOP AT gt_log INTO ls_log.
+      MODIFY zhrsst_a1_2 FROM ls_log.
+      COMMIT WORK AND WAIT.
+      IF sy-subrc <> 0.
+        MESSAGE ID 'ZHR_SST_CONCUR_MC' TYPE 'I' NUMBER 005 INTO lv_message.
+        WRITE:/ lv_message.
+      ENDIF.
+    ENDLOOP.
+  ENDIF.
+ENDFORM.
+
+*&---------------------------------------------------------------------*
+*&      Form  WRITE_DATA_FTP
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM write_data_ftp .
+
+  DATA: dsn      TYPE fileextern,
+        msg(128),
+        r_file   TYPE ys_ftpfile. "YSTRANSP-RFILENAME. "
+
+  DATA: rf_descr TYPE REF TO cl_abap_structdescr,
+        rf_conv  TYPE REF TO cl_simple_csv_converter.
+  DATA: lt_comp TYPE abap_compdescr_tab,
+        ls_comp TYPE LINE OF abap_compdescr_tab.
+  DATA: lv_names TYPE string.
+  DATA: lv_path TYPE ys_ftpfile. "YS_FTPFILE.
+  DATA: ls_csv LIKE LINE OF gt_csv_table.
+  DATA: lv_filep TYPE ys_ftpfile.
+
+  IF p_filen = 'SST_Deloitte_<DATE>_<TIME>.csv'.
+    CONCATENATE 'SST_Deloitte_' sy-datum '_' sy-uzeit '.csv' INTO p_filen.
+  ENDIF.
+
+  CONCATENATE '' p_filen INTO lv_filep.
+
+  IF p_asp IS INITIAL.
+    CONCATENATE '/' sy-sysid '_R3WRITE/hr-sf/' p_filen INTO p_asp.
+  ENDIF.
+
+
+  dsn = p_asp.
+
+  " IF p_edi = abap_true.   "Employee directory interface
+
+  " Dataset öffnen
+  OPEN DATASET dsn FOR OUTPUT IN TEXT MODE ENCODING DEFAULT
+    MESSAGE msg.
+  IF sy-subrc = 0.
+    LOOP AT gt_csv_table INTO ls_csv.
+      TRANSFER ls_csv TO dsn.
+    ENDLOOP.
+
+    CLOSE DATASET dsn.
+  ELSE.
+    MESSAGE e001(ys) WITH msg.
+  ENDIF.
+
+  r_file = p_filen. "Remotefile-Name
+
+  IF sy-sysid = 'WE5' OR sy-sysid = 'WK5'.
+    "lv_path = '/ftphrsf/Test_Deloitte'.
+    lv_path = 'Test_Deloitte'.
+  ELSEIF sy-sysid = 'WP5'.
+    "lv_path = '/ftphrsf/Prod_Deloitte'.
+    lv_path = 'Prod_Deloitte'.
+  ENDIF.
+
+* FTP Transfer
+  CALL FUNCTION 'Y_S_TRANS'
+    EXPORTING
+      modul                   = p_modul
+      rfile                   = r_file "Name File auf FTP
+      lfile                   = lv_filep "p_filef "Pfad und Name auf r3write
+      rpath                   = lv_path "'/ftphrqtx/' "Pfad auf FTP Server
+      ftpmode                 = 'P' "Transfer nach FTP Server
+*     ASCII                   =
+    EXCEPTIONS
+      wrong_ftp_mode          = 1
+      no_authority            = 2
+      no_authority_c_function = 3
+      module_not_found        = 4
+      lpath_not_found         = 5
+      logon_error             = 6
+      rpath_file_not_found    = 7
+      rhost_not_reached       = 8
+      other_errors            = 9
+      OTHERS                  = 10.
+  IF sy-subrc <> 0.
+    MESSAGE ID sy-msgid TYPE sy-msgty NUMBER sy-msgno
+            WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4.
+  ELSE.
+    WRITE: TEXT-005, /.
+  ENDIF.
+ENDFORM.
