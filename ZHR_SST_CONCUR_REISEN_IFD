@@ -139,7 +139,7 @@ FORM fetch_data .
 
 * Get the 'SAVED_0700' trips from /nyx/a1_hdr
   SELECT * FROM /nyx/a1_hdr                   "#EC CI_ALL_FIELDS_NEEDED
-  INTO TABLE lt_a1_hdr.            "#EC "#EC CI_NOFIELD "#EC CI_NOWHERE
+  INTO TABLE lt_a1_hdr WHERE a1mnr >= 0. "#EC "#EC CI_NOFIELD "#EC CI_NOWHERE
 
   IF sy-subrc <> 0.
     MESSAGE ID 'ZHR_SST_CONCUR_MC' TYPE 'E' NUMBER 001.
@@ -434,6 +434,25 @@ FORM process_data .
 
           APPEND ls_log TO gt_log.
           APPEND ls_aus_d TO gt_aus_d.
+        ELSE.     " CREATE already exists, check the change
+* Compare with entries
+          IF ls_log-zland NE ls_aus_d-zland OR ls_log-datv1 NE ls_aus_d-datv1 OR ls_log-datb1 NE ls_aus_d-datb1
+            OR ls_log-ankey NE ls_aus_d-ankey OR ls_log-name NE ls_aus_d-name OR ls_log-stras NE ls_aus_d-stras
+            OR ls_log-hausn NE ls_aus_d-hausn OR ls_log-plz NE ls_aus_d-plz OR ls_log-ort NE ls_aus_d-ort.
+
+            ls_aus_d-tw_status = 'APPROVED'.
+
+            MOVE-CORRESPONDING EXACT ls_aus_d TO ls_log.
+            ls_log-a1mnr = ls_a1_hdr-a1mnr.
+            ls_log-vp_date = ls_a1_hist-date_from.
+            ls_log-vp_time = ls_a1_hist-time_from.
+            ls_log-vp_action = 'CHANGE'.
+
+            APPEND ls_log TO gt_log.
+            APPEND ls_aus_d TO gt_aus_d.
+          ENDIF.
+
+          CONTINUE.
         ENDIF.
       ENDLOOP.
 
@@ -500,6 +519,25 @@ FORM process_data .
 
         APPEND ls_log TO gt_log.
         APPEND ls_aus_d TO gt_aus_d.
+      ELSE.           " CREATE already exists, check the change
+* Compare with entries
+        IF ls_log-zland NE ls_aus_d-zland OR ls_log-datv1 NE ls_aus_d-datv1 OR ls_log-datb1 NE ls_aus_d-datb1
+          OR ls_log-ankey NE ls_aus_d-ankey OR ls_log-name NE ls_aus_d-name OR ls_log-stras NE ls_aus_d-stras
+          OR ls_log-hausn NE ls_aus_d-hausn OR ls_log-plz NE ls_aus_d-plz OR ls_log-ort NE ls_aus_d-ort.
+
+          ls_aus_d-tw_status = 'APPROVED'.
+
+          MOVE-CORRESPONDING EXACT ls_aus_d TO ls_log.
+          ls_log-a1mnr = ls_a1_hdr-a1mnr.
+          ls_log-vp_date = ls_a1_hist-date_from.
+          ls_log-vp_time = ls_a1_hist-time_from.
+          ls_log-vp_action = 'CHANGE'.
+
+          APPEND ls_log TO gt_log.
+          APPEND ls_aus_d TO gt_aus_d.
+        ENDIF.
+
+        CONTINUE.
       ENDIF.
     ENDIF.
   ENDLOOP.
