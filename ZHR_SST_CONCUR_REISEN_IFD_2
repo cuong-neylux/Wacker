@@ -184,6 +184,7 @@ FORM fetch_data .
   LOOP AT lt_a1_hist INTO ls_a1_hist.
 * Nationality
     IF s_natio IS NOT INITIAL.
+      CLEAR: lt_p0002.
       CALL FUNCTION 'HR_READ_INFOTYPE'
         EXPORTING
           tclas     = 'A'
@@ -205,7 +206,7 @@ FORM fetch_data .
 
 * Request ID
     IF s_req_nr IS NOT INITIAL.
-      SELECT SINGLE * FROM /nyx/sccoreq21v4 INTO ls_dest_list WHERE proc_value = ls_a1_hdr-a1mnr.
+      SELECT SINGLE * FROM /nyx/sccoreq21v4 INTO ls_dest_list WHERE proc_value = ls_a1_hist-a1mnr.
       IF sy-subrc <> 0.
         CONTINUE.
       ENDIF.
@@ -222,7 +223,7 @@ FORM fetch_data .
 
 * Status
     IF s_twstat IS NOT INITIAL.
-      SELECT SINGLE * FROM /nyx/sccoreq21v4 INTO ls_dest_list WHERE proc_value = ls_a1_hdr-a1mnr.
+      SELECT SINGLE * FROM /nyx/sccoreq21v4 INTO ls_dest_list WHERE proc_value = ls_a1_hist-a1mnr.
       IF sy-subrc <> 0.
         CONTINUE.
       ENDIF.
@@ -272,10 +273,12 @@ FORM process_data .
   DATA: ls_p0001 LIKE LINE OF lt_p0001.
   DATA: lt_p0105 TYPE p0105_tb.
   DATA: ls_p0105 LIKE LINE OF lt_p0105.
+  DATA: ls_pa0105 TYPE pa0105.
+  DATA: lv_doc_id TYPE /nyx/sc_doc_id.
 
   CLEAR: gt_aus_d.
   LOOP AT gt_a1_hist INTO ls_a1_hist.
-    CLEAR: ls_aus_d, ls_log.
+    CLEAR: ls_aus_d, ls_log, lt_p0001.
 
     ls_aus_d-pernr = ls_a1_hist-pernr.
 
@@ -298,6 +301,7 @@ FORM process_data .
     ENDIF.
 
     ls_aus_d-trip_id = ls_a1_hdr-customer01.
+    lv_doc_id = ls_a1_hdr-customer01(32).
 
 * Read cost assignment
     CALL FUNCTION 'HR_READ_INFOTYPE'
@@ -325,7 +329,7 @@ FORM process_data .
     CLEAR: ls_custom_value.
     SELECT SINGLE * FROM /nyx/sccoreq08v4 INTO ls_custom_value
       WHERE
-         doc_id = ls_tr_header-doc_id AND
+         doc_id = lv_doc_id AND
          time_stamp = ls_tr_header-time_stamp AND
          customfieldname = 'CUSTOM5'.
 
@@ -334,29 +338,26 @@ FORM process_data .
       lv_rba_email_address = ls_custom_value-value.
 
 * Read cost assignment
-      CLEAR: lt_p0105, ls_p0105.
-      CALL FUNCTION 'HR_READ_INFOTYPE'
-        EXPORTING
-          tclas     = 'A'
-          pernr     = ls_aus_d-pernr
-          infty     = '0105'
-          begda     = sy-datum
-          endda     = sy-datum
-        TABLES
-          infty_tab = lt_p0105.
+*      CLEAR: lt_p0105, ls_p0105.
+*      CALL FUNCTION 'HR_READ_INFOTYPE'
+*        EXPORTING
+*          tclas     = 'A'
+*          pernr     = ls_aus_d-pernr
+*          infty     = '0105'
+*          begda     = sy-datum
+*          endda     = sy-datum
+*        TABLES
+*          infty_tab = lt_p0105.
 
-*      SELECT SINGLE * FROM pa0105 INTO ls_pa0105
-*        WHERE
-*          subty = '0010' AND
-*          begda <= sy-datum AND
-*          endda >= sy-datum AND
-*          usrid_long = lv_rba_email_address.
+      SELECT SINGLE * FROM pa0105 INTO ls_pa0105
+        WHERE
+          subty = '0010' AND
+          begda <= sy-datum AND
+          endda >= sy-datum AND
+          usrid_long = lv_rba_email_address.
 
       IF sy-subrc = 0.
-        READ TABLE lt_p0105 INTO ls_p0105 WITH KEY subty = '0010' usrid_long = lv_rba_email_address.
-        IF sy-subrc = 0 AND ls_p0105-begda <= sy-datum AND ls_p0105-endda >= sy-datum.
-          lv_rba_pernr = ls_p0105-pernr.
-        ENDIF.
+        lv_rba_pernr = ls_pa0105-pernr.
       ENDIF.
     ENDIF.
 
@@ -439,12 +440,12 @@ FORM process_data .
         ENDIF.
 
 * If there was a entry in /nyx/a1_hist with the status DELETED
-*        SELECT SINGLE * FROM /nyx/a1_hist INTO ls_a1_hist_delete WHERE pernr = ls_aus_d-pernr AND a1mnr = ls_a1_hdr-a1mnr AND status = 'DELETED'.
+*        SELECT SINGLE * FROM /nyx/a1_hist INTO ls_a1_hist_delete WHERE pernr = ls_aus_d-pernr AND a1mnr = ls_a1_hist-a1mnr AND status = 'DELETED'.
 *        IF sy-subrc = 0.
 *          ls_aus_d-tw_status = 'CANCEL'.
 *
 *          MOVE-CORRESPONDING EXACT ls_aus_d TO ls_log.
-*          ls_log-a1mnr = ls_a1_hdr-a1mnr.
+*          ls_log-a1mnr = ls_a1_hist-a1mnr.
 *          ls_log-vp_date = ls_a1_hist_delete-date_from.
 *          ls_log-vp_time = ls_a1_hist_delete-time_from.
 *          ls_log-vp_action = 'DELETE'.
