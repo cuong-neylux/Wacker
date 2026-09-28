@@ -154,12 +154,16 @@ FORM fetch_data .
   DELETE ADJACENT DUPLICATES FROM lt_a1_hist COMPARING pernr a1mnr.
 
 * Get the trips from /nyx/a1_hdr in the
-  SELECT * FROM /nyx/a1_hdr                   "#EC CI_ALL_FIELDS_NEEDED
+  SELECT customer01 FROM /nyx/a1_hdr                   "#EC CI_ALL_FIELDS_NEEDED
   INTO TABLE gt_a1_hdr WHERE begda >= p_begda AND endda <= p_endda. "#EC "#EC CI_NOFIELD "#EC CI_NOWHERE
 
   IF sy-subrc <> 0.
     MESSAGE ID 'ZHR_SST_CONCUR_MC' TYPE 'E' NUMBER 001.
   ENDIF.
+
+* Sort tables
+  SORT gt_a1_hist BY pernr a1mnr.
+  SORT gt_a1_hdr BY pernr a1mnr.
 
 * Filtern the trips based on start date and end date
   IF p_begda IS NOT INITIAL.
@@ -198,7 +202,7 @@ FORM fetch_data .
 *      SELECT SINGLE * FROM pa0002 INTO ls_pa0002 WHERE pernr = ls_a1_hdr-pernr AND begda < sy-datum AND endda > sy-datum. "#EC CI_ALL_FIELDS_NEEDED
       IF sy-subrc = 0 AND lines( lt_p0002 ) > 0.
         READ TABLE lt_p0002 INTO ls_p0002 INDEX 1.
-        IF sy-subrc <> 0 OR ls_p0002 NOT IN s_natio.
+        IF sy-subrc <> 0 OR ls_p0002-natio NOT IN s_natio.
           CONTINUE.
         ENDIF.
       ENDIF.
@@ -316,7 +320,7 @@ FORM process_data .
 
 *    SELECT SINGLE * FROM pa0001 INTO ls_pa0001 WHERE pernr = ls_a1_hist-pernr AND begda <= sy-datum AND endda >= sy-datum.
 
-    IF sy-subrc = 0 OR lines( lt_p0001 ) > 0.
+    IF sy-subrc = 0 AND lines( lt_p0001 ) > 0.
       READ TABLE lt_p0001 INTO ls_p0001 INDEX 1.
       IF sy-subrc = 0.
         ls_aus_d-fdf_kostl_pernr = ls_p0001-kostl.
@@ -330,7 +334,6 @@ FORM process_data .
     SELECT SINGLE * FROM /nyx/sccoreq08v4 INTO ls_custom_value
       WHERE
          doc_id = lv_doc_id AND
-         time_stamp = ls_tr_header-time_stamp AND
          customfieldname = 'CUSTOM5'.
 
     IF sy-subrc = 0.
@@ -779,12 +782,12 @@ FORM save_data .
 *TODO: Update the table
     LOOP AT gt_log INTO ls_log.
       MODIFY zhrsst_a1_2 FROM ls_log.
-      COMMIT WORK AND WAIT.
       IF sy-subrc <> 0.
         MESSAGE ID 'ZHR_SST_CONCUR_MC' TYPE 'I' NUMBER 005 INTO lv_message.
         WRITE:/ lv_message.
       ENDIF.
     ENDLOOP.
+    COMMIT WORK AND WAIT.
   ENDIF.
 ENDFORM.
 
