@@ -11,7 +11,7 @@
 *& This report lists all the trips with new status CREATE/CHANGE/DELETE
 *& Generate a CSV file and download/upload to local machine/FTP server
 *&---------------------------------------------------------------------*
-REPORT zhr_sst_concur_reisen_ifd2.
+REPORT zhr_sst_concur_reisen_ifd.
 
 
 *&---------------------------------------------------------------------*
@@ -29,8 +29,7 @@ DATA: gv_filepath TYPE string.
 DATA: gv_action TYPE /nyx/a1_sync_action_vp.
 DATA: gt_log TYPE TABLE OF zhrsst_a1_2.
 DATA: gt_a1_2 TYPE TABLE OF zhrsst_a1_2.
-DATA: gt_dest TYPE TABLE OF /nyx/a1_dest.
-DATA: gt_pa0105 TYPE TABLE OF pa0105.
+DATA: gt_dest TYPE SORTED TABLE OF /nyx/a1_dest WITH NON-UNIQUE KEY pernr a1mnr.
 DATA: gt_a1_hist_deleted TYPE TABLE OF /nyx/a1_hist.
 TYPES gty_data TYPE c LENGTH 4096.
 
@@ -245,7 +244,7 @@ FORM fetch_data .
   ENDLOOP.
 
 * Fetch all neccesary data
-  SELECT * FROM zhrsst_a1_2 INTO TABLE gt_a1_2.
+  SELECT * FROM zhrsst_a1_2 INTO TABLE gt_a1_2 WHERE a1mnr >= 0.
   SELECT * FROM /nyx/a1_dest INTO TABLE gt_dest FOR ALL ENTRIES IN gt_a1_hist WHERE
     pernr = gt_a1_hist-pernr AND a1mnr = gt_a1_hist-a1mnr.
 
@@ -265,7 +264,6 @@ FORM fetch_data .
     status = 'DELETED'.
 
 * Sort tables
-  SORT gt_dest BY pernr a1mnr bsnr ASCENDING.
   SORT gt_a1_2 BY trip_id.
   SORT gt_a1_hdr BY pernr a1mnr.
 ENDFORM.
@@ -280,6 +278,7 @@ FORM process_data .
   DATA: ls_aus_d     TYPE zhr_sst_concur_reisen_output_s.
   DATA: lt_aus_d     TYPE TABLE OF zhr_sst_concur_reisen_output_s.
   DATA: ls_a1_dest TYPE /nyx/a1_dest.
+  DATA: lt_a1_dest_filtered TYPE SORTED TABLE OF /nyx/a1_dest WITH NON-UNIQUE KEY pernr a1mnr.
   DATA: lt_a1_dest TYPE TABLE OF /nyx/a1_dest.
   DATA: ls_persparm TYPE fpb_persparm.
   DATA: lv_pernr TYPE pernr_d.
@@ -393,10 +392,12 @@ FORM process_data .
     ls_aus_d-times = ls_a1_hist-time_from.
 
 * Read destinations
-    READ TABLE gt_dest INTO ls_a1_dest WITH KEY pernr = ls_a1_hist-pernr a1mnr = ls_a1_hist-a1mnr.
-    IF sy-subrc = 0.
+    CLEAR lt_a1_dest_filtered.
+    lt_a1_dest_filtered = FILTER #( gt_dest WHERE pernr = ls_a1_hist-pernr AND a1mnr = ls_a1_hist-a1mnr ).
+    IF lines( lt_a1_dest_filtered ) > 0.
       lv_trip_id = ls_aus_d-trip_id.
-      LOOP AT gt_dest INTO ls_a1_dest WHERE pernr = ls_a1_hist-pernr AND a1mnr = ls_a1_hist-a1mnr.
+      CLEAR: ls_a1_dest.
+      LOOP AT lt_a1_dest_filtered INTO ls_a1_dest.
         CASE sy-tabix.
           WHEN 1.
             CONCATENATE lv_trip_id '1ST' INTO ls_aus_d-trip_id.
