@@ -393,6 +393,11 @@ FORM process_data .
     ls_aus_d-dates = ls_a1_hist-date_from.
     ls_aus_d-times = ls_a1_hist-time_from.
 
+* TODO: in case log table has 3 entries, dest has 2
+match -> do nothing
+do not match -> change
+delete
+
 * Read destinations
     CLEAR lt_a1_dest_filtered.
     lt_a1_dest_filtered = FILTER #( gt_dest WHERE pernr = ls_a1_hist-pernr AND a1mnr = ls_a1_hist-a1mnr ).
@@ -519,6 +524,7 @@ FORM process_data .
       IF sy-subrc = 0.
 * Read from log table
         CLEAR: lt_log, ls_log.
+* TODO: Loop instead of select
         SELECT * FROM zhrsst_a1_2 INTO TABLE lt_log WHERE trip_id = ls_aus_d-trip_id AND a1mnr = ls_a1_hist-a1mnr.
         IF sy-subrc = 0 AND lines( lt_log ) > 0.
           LOOP AT lt_log INTO ls_log.
