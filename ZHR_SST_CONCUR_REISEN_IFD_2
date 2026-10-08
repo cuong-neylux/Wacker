@@ -312,10 +312,12 @@ FORM process_data .
 *   Get the trip id
     CLEAR: ls_a1_hdr.
     READ TABLE gt_a1_hdr INTO ls_a1_hdr WITH KEY pernr = ls_a1_hist-pernr a1mnr = ls_a1_hist-a1mnr.
+*TODO: header is deleted -> Do not skip
     IF sy-subrc <> 0 OR ls_a1_hdr-customer01 IS INITIAL.
       CONTINUE.
     ENDIF.
 
+*TODO: in case header is deleted -> how to handle it
     ls_aus_d-trip_id = ls_a1_hdr-customer01.
     lv_doc_id = ls_a1_hdr-customer01(32).
 
@@ -501,6 +503,7 @@ FORM process_data .
       ENDLOOP.
 
     ELSE.
+* TODO: trip_id is empty because header is deleted
 * No destinations available
       CONCATENATE ls_aus_d-trip_id '1ST' INTO ls_aus_d-trip_id.
 
