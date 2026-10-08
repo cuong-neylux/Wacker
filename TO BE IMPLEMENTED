@@ -1,0 +1,73 @@
+* 1) Current state of every logged destination of this trip
+CLEAR: lt_cur, lv_used.
+LOOP AT gt_a1_2 INTO ls_log WHERE a1mnr = ls_a1_hist-a1mnr.
+  lv_used = lv_used + 1.                 " suffixes ever handed out, incl. cancelled
+  IF ls_log-vp_action = 'DELETE'.
+    CONTINUE.                            " already cancelled -> not a candidate
+  ENDIF.
+  APPEND VALUE #( log = ls_log ) TO lt_cur.
+ENDLOOP.
+
+* 2) Pass 1: identical address -> unchanged, keeps its trip_id
+LOOP AT lt_a1_dest_filtered INTO ls_a1_dest.
+  lv_found = abap_false.
+  LOOP AT lt_cur ASSIGNING <ls_cur>
+       WHERE matched   = abap_false
+         AND log-ankey = ls_a1_dest-t536c_key_bs
+         AND log-name  = ls_a1_dest-name_bs
+         AND log-stras = ls_a1_dest-strasse_bs
+         AND log-hausn = ls_a1_dest-hausnr_bs
+         AND log-plz   = ls_a1_dest-plz_bs
+         AND log-ort   = ls_a1_dest-ort_bs.
+    <ls_cur>-matched = abap_true.
+    lv_found = abap_true.
+    EXIT.
+  ENDLOOP.
+  IF lv_found = abap_false.
+    APPEND ls_a1_dest TO lt_open_dest.
+  ENDIF.
+ENDLOOP.
+
+* 3) Pass 2: leftover destinations -> CHANGE (reuse id) or CREATE (new id)
+LOOP AT lt_open_dest INTO ls_a1_dest.
+  ls_aus_d-ankey = ls_a1_dest-t536c_key_bs.
+  ls_aus_d-name  = ls_a1_dest-name_bs.
+  ls_aus_d-stras = ls_a1_dest-strasse_bs.
+  ls_aus_d-hausn = ls_a1_dest-hausnr_bs.
+  ls_aus_d-plz   = ls_a1_dest-plz_bs.
+  ls_aus_d-ort   = ls_a1_dest-ort_bs.
+
+  READ TABLE lt_cur ASSIGNING <ls_cur> WITH KEY matched = abap_false.
+  IF sy-subrc = 0.
+    <ls_cur>-matched = abap_true.
+    ls_aus_d-trip_id = <ls_cur>-log-trip_id.
+    lv_action = 'CHANGE'.
+  ELSE.
+    lv_used = lv_used + 1.
+    ls_aus_d-trip_id = lv_trip_id && SWITCH string( lv_used
+                         WHEN 1 THEN `1ST` WHEN 2 THEN `2ND` WHEN 3 THEN `3RD`
+                         ELSE |{ lv_used }TH| ).
+    lv_action = 'CREATE'.
+  ENDIF.
+
+  ls_aus_d-tw_status = 'APPROVED'.
+  MOVE-CORRESPONDING EXACT ls_aus_d TO ls_log.
+  ls_log-a1mnr     = ls_a1_hist-a1mnr.
+  ls_log-vp_date   = ls_a1_hist-date_from.
+  ls_log-vp_time   = ls_a1_hist-time_from.
+  ls_log-vp_action = lv_action.
+  APPEND ls_log   TO gt_log.
+  APPEND ls_aus_d TO gt_aus_d.
+ENDLOOP.
+
+* 4) Logged destinations without a partner -> removed in Concur
+LOOP AT lt_cur ASSIGNING <ls_cur> WHERE matched = abap_false.
+  ls_log = <ls_cur>-log.
+  MOVE-CORRESPONDING EXACT ls_log TO ls_aus_d.
+  ls_aus_d-tw_status = 'CANCEL'.
+  ls_log-vp_date   = ls_a1_hist-date_from.
+  ls_log-vp_time   = ls_a1_hist-time_from.
+  ls_log-vp_action = 'DELETE'.
+  APPEND ls_log   TO gt_log.
+  APPEND ls_aus_d TO gt_aus_d.
+ENDLOOP.
