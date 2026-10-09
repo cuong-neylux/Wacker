@@ -273,6 +273,10 @@ ENDFORM.
 *       Filtern the data based on selections and parameters and process data
 *----------------------------------------------------------------------*
 FORM process_data .
+  TYPES: BEGIN OF lty_cur,
+           log     TYPE zhrsst_a1_2,     " logged destination (one row per destination)
+           matched TYPE abap_bool,       " already paired with a line of /nyx/a1_dest
+         END OF lty_cur.
   DATA: ls_a1_hdr TYPE /nyx/a1_hdr.
   DATA: ls_tr_header TYPE /nyx/sccoreq02v4.
   DATA: ls_aus_d     TYPE zhr_sst_concur_reisen_output_s.
@@ -301,7 +305,12 @@ FORM process_data .
   DATA: ls_pa0105 TYPE pa0105.
   DATA: lv_doc_id TYPE /nyx/sc_doc_id.
   DATA: lv_trip_id TYPE /nyx/sc_co_req_legid_v04.
-
+  DATA: lt_cur       TYPE STANDARD TABLE OF lty_cur.
+  DATA: lt_open_dest TYPE STANDARD TABLE OF /nyx/a1_dest.
+  DATA: lv_used      TYPE i.             " number of suffixes ever handed out for the trip
+  DATA: lv_found     TYPE abap_bool.
+  DATA: lv_action    TYPE zhrsst_a1_2-vp_action.
+  FIELD-SYMBOLS: <ls_cur> TYPE lty_cur.
 
   CLEAR: gt_aus_d.
   LOOP AT gt_a1_hist INTO ls_a1_hist.
@@ -314,13 +323,17 @@ FORM process_data .
     READ TABLE gt_a1_hdr INTO ls_a1_hdr WITH KEY pernr = ls_a1_hist-pernr a1mnr = ls_a1_hist-a1mnr.
     IF sy-subrc <> 0.
       READ TABLE gt_a1_2 INTO ls_log WITH KEY a1mnr = ls_a1_hist-a1mnr.
-      IF sy-subrc <> 0.                                                 " The trip is deleted and never logged
+      IF sy-subrc <> 0.                                                 " The trip is deleted and never logged -> do nothing
         CONTINUE.
       ENDIF.
     ENDIF.
 
-    IF ls_a1_hdr IS NOT INITIAL AND ls_a1_hdr-customer01 IS NOT INITIAL.
-      ls_aus_d-trip_id = ls_a1_hdr-customer01.
+    IF ls_a1_hdr IS NOT INITIAL.
+      IF ls_a1_hdr-customer01 IS NOT INITIAL.
+        ls_aus_d-trip_id = ls_a1_hdr-customer01.
+      ELSE.
+        CONTINUE.                                                       " The trip was not created in concur -> skip
+      ENDIF.
     ENDIF.
 
 
@@ -401,106 +414,78 @@ FORM process_data .
     lt_a1_dest_filtered = FILTER #( gt_dest WHERE pernr = ls_a1_hist-pernr AND a1mnr = ls_a1_hist-a1mnr ).
     IF lines( lt_a1_dest_filtered ) > 0.
       lv_trip_id = ls_aus_d-trip_id.
-      CLEAR: ls_a1_dest.
+* 1) Current state of every logged destination of this trip
+      CLEAR: lt_cur, lv_used.
+      LOOP AT gt_a1_2 INTO ls_log WHERE a1mnr = ls_a1_hist-a1mnr.
+        lv_used = lv_used + 1.                 " suffixes ever handed out, incl. cancelled
+        IF ls_log-vp_action = 'DELETE'.
+          CONTINUE.                            " already cancelled -> not a candidate
+        ENDIF.
+        APPEND VALUE #( log = ls_log ) TO lt_cur.
+      ENDLOOP.
+
+* 2) Pass 1: identical address -> unchanged, keeps its trip_id
       LOOP AT lt_a1_dest_filtered INTO ls_a1_dest.
-        CASE sy-tabix.
-          WHEN 1.
-            CONCATENATE lv_trip_id '1ST' INTO ls_aus_d-trip_id.
-          WHEN 2.
-            CONCATENATE lv_trip_id '2ND' INTO ls_aus_d-trip_id.
-          WHEN 3.
-            CONCATENATE lv_trip_id '3RD' INTO ls_aus_d-trip_id.
-          WHEN 4.
-            CONCATENATE lv_trip_id '4TH' INTO ls_aus_d-trip_id.
-          WHEN 5.
-            CONCATENATE lv_trip_id '5TH' INTO ls_aus_d-trip_id.
-          WHEN 6.
-            CONCATENATE lv_trip_id '6TH' INTO ls_aus_d-trip_id.
-          WHEN 7.
-            CONCATENATE lv_trip_id '7TH' INTO ls_aus_d-trip_id.
-          WHEN 8.
-            CONCATENATE lv_trip_id '8TH' INTO ls_aus_d-trip_id.
-          WHEN 9.
-            CONCATENATE lv_trip_id '9TH' INTO ls_aus_d-trip_id.
-          WHEN 10.
-            CONCATENATE lv_trip_id '10TH' INTO ls_aus_d-trip_id.
-          WHEN 11.
-            CONCATENATE lv_trip_id '11TH' INTO ls_aus_d-trip_id.
-          WHEN OTHERS.
-        ENDCASE.
+        lv_found = abap_false.
+        LOOP AT lt_cur ASSIGNING <ls_cur>
+             WHERE matched   = abap_false
+               AND log-ankey = ls_a1_dest-t536c_key_bs
+               AND log-name  = ls_a1_dest-name_bs
+               AND log-stras = ls_a1_dest-strasse_bs
+               AND log-hausn = ls_a1_dest-hausnr_bs
+               AND log-plz   = ls_a1_dest-plz_bs
+               AND log-ort   = ls_a1_dest-ort_bs.
+          <ls_cur>-matched = abap_true.
+          lv_found = abap_true.
+          EXIT.
+        ENDLOOP.
+        IF lv_found = abap_false.
+          APPEND ls_a1_dest TO lt_open_dest.
+        ENDIF.
+      ENDLOOP.
+
+* 3) Pass 2: leftover destinations -> CHANGE (reuse id) or CREATE (new id)
+      LOOP AT lt_open_dest INTO ls_a1_dest.
         ls_aus_d-ankey = ls_a1_dest-t536c_key_bs.
-        ls_aus_d-name = ls_a1_dest-name_bs.
+        ls_aus_d-name  = ls_a1_dest-name_bs.
         ls_aus_d-stras = ls_a1_dest-strasse_bs.
         ls_aus_d-hausn = ls_a1_dest-hausnr_bs.
-        ls_aus_d-plz = ls_a1_dest-plz_bs.
-        ls_aus_d-ort = ls_a1_dest-ort_bs.
+        ls_aus_d-plz   = ls_a1_dest-plz_bs.
+        ls_aus_d-ort   = ls_a1_dest-ort_bs.
 
-* If the entry exists with the status DELETE => remove
-        CLEAR: ls_log.
-        READ TABLE gt_a1_2 INTO ls_log WITH KEY trip_id = ls_aus_d-trip_id a1mnr = ls_a1_hist-a1mnr vp_action = 'DELETE'.
+        READ TABLE lt_cur ASSIGNING <ls_cur> WITH KEY matched = abap_false.
         IF sy-subrc = 0.
-          CONTINUE.
+          <ls_cur>-matched = abap_true.
+          ls_aus_d-trip_id = <ls_cur>-log-trip_id.
+          lv_action = 'CHANGE'.
+        ELSE.
+          lv_used = lv_used + 1.
+          ls_aus_d-trip_id = lv_trip_id && SWITCH string( lv_used
+                               WHEN 1 THEN `1ST` WHEN 2 THEN `2ND` WHEN 3 THEN `3RD`
+                               ELSE |{ lv_used }TH| ).
+          lv_action = 'CREATE'.
         ENDIF.
 
-* Check if the change is available
-        CLEAR: ls_log.
-        READ TABLE gt_a1_2 INTO ls_log WITH KEY trip_id = ls_aus_d-trip_id a1mnr = ls_a1_hist-a1mnr vp_action = 'CHANGE'. " Check if the change exists
-        IF sy-subrc = 0.
-* Compare with entries
-          IF ls_log-ankey NE ls_aus_d-ankey OR ls_log-name NE ls_aus_d-name OR ls_log-stras NE ls_aus_d-stras
-            OR ls_log-hausn NE ls_aus_d-hausn OR ls_log-plz NE ls_aus_d-plz OR ls_log-ort NE ls_aus_d-ort.
+        ls_aus_d-tw_status = 'APPROVED'.
+        MOVE-CORRESPONDING EXACT ls_aus_d TO ls_log.
+        ls_log-a1mnr     = ls_a1_hist-a1mnr.
+        ls_log-vp_date   = ls_a1_hist-date_from.
+        ls_log-vp_time   = ls_a1_hist-time_from.
+        ls_log-vp_action = lv_action.
+        APPEND ls_log   TO gt_log.
+        APPEND ls_aus_d TO gt_aus_d.
+      ENDLOOP.
 
-            ls_aus_d-tw_status = 'APPROVED'.
-
-            MOVE-CORRESPONDING EXACT ls_aus_d TO ls_log.
-            ls_log-a1mnr = ls_a1_hist-a1mnr.
-            ls_log-vp_date = ls_a1_hist-date_from.
-            ls_log-vp_time = ls_a1_hist-time_from.
-            ls_log-vp_action = 'CHANGE'.
-
-            APPEND ls_log TO gt_log.
-            APPEND ls_aus_d TO gt_aus_d.
-          ENDIF.
-
-          CONTINUE.
-        ENDIF.
-
-* If no entry exists at all => create
-        CLEAR: ls_log.
-        READ TABLE gt_a1_2 INTO ls_log WITH KEY trip_id = ls_aus_d-trip_id a1mnr = ls_a1_hist-a1mnr vp_action = 'CREATE'. " Check if the create exists
-        IF sy-subrc <> 0.
-
-          ls_aus_d-tw_status = 'APPROVED'.
-
-          MOVE-CORRESPONDING EXACT ls_aus_d TO ls_log.
-          ls_log-a1mnr = ls_a1_hist-a1mnr.
-          ls_log-vp_date = ls_a1_hist-date_from.
-          ls_log-vp_time = ls_a1_hist-time_from.
-          ls_log-vp_action = 'CREATE'.
-
-          APPEND ls_log TO gt_log.
-          APPEND ls_aus_d TO gt_aus_d.
-
-          CONTINUE.
-        ELSE.     " CREATE already exists, check the change
-* Compare with entries
-          IF ls_log-ankey NE ls_aus_d-ankey OR ls_log-name NE ls_aus_d-name OR ls_log-stras NE ls_aus_d-stras
-            OR ls_log-hausn NE ls_aus_d-hausn OR ls_log-plz NE ls_aus_d-plz OR ls_log-ort NE ls_aus_d-ort.
-
-            ls_aus_d-tw_status = 'APPROVED'.
-
-            MOVE-CORRESPONDING EXACT ls_aus_d TO ls_log.
-            ls_log-a1mnr = ls_a1_hist-a1mnr.
-            ls_log-vp_date = ls_a1_hist-date_from.
-            ls_log-vp_time = ls_a1_hist-time_from.
-            ls_log-vp_action = 'CHANGE'.
-
-            APPEND ls_log TO gt_log.
-            APPEND ls_aus_d TO gt_aus_d.
-          ENDIF.
-
-          CONTINUE.
-        ENDIF.
+* 4) Logged destinations without a partner -> removed in Concur
+      LOOP AT lt_cur ASSIGNING <ls_cur> WHERE matched = abap_false.
+        ls_log = <ls_cur>-log.
+        MOVE-CORRESPONDING EXACT ls_log TO ls_aus_d.
+        ls_aus_d-tw_status = 'CANCEL'.
+        ls_log-vp_date   = ls_a1_hist-date_from.
+        ls_log-vp_time   = ls_a1_hist-time_from.
+        ls_log-vp_action = 'DELETE'.
+        APPEND ls_log   TO gt_log.
+        APPEND ls_aus_d TO gt_aus_d.
       ENDLOOP.
 
     ELSE.
