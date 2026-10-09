@@ -414,8 +414,9 @@ FORM process_data .
     lt_a1_dest_filtered = FILTER #( gt_dest WHERE pernr = ls_a1_hist-pernr AND a1mnr = ls_a1_hist-a1mnr ).
     IF lines( lt_a1_dest_filtered ) > 0.
       lv_trip_id = ls_aus_d-trip_id.
+
 * 1) Current state of every logged destination of this trip
-      CLEAR: lt_cur, lv_used.
+      CLEAR: lt_cur, lv_used, lt_open_dest.
       LOOP AT gt_a1_2 INTO ls_log WHERE a1mnr = ls_a1_hist-a1mnr.
         lv_used = lv_used + 1.                 " suffixes ever handed out, incl. cancelled
         IF ls_log-vp_action = 'DELETE'.
@@ -507,7 +508,7 @@ FORM process_data .
       IF sy-subrc = 0.
 * Read from log table
         CLEAR: ls_log.
-        LOOP AT gt_a1_2 INTO ls_log WHERE a1mnr = ls_a1_hist-a1mnr.
+        LOOP AT gt_a1_2 INTO ls_log WHERE a1mnr = ls_a1_hist-a1mnr AND vp_action <> 'DELETE'.
           MOVE-CORRESPONDING EXACT ls_log TO ls_aus_d.
           ls_aus_d-tw_status = 'CANCEL'.
 
