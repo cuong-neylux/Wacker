@@ -1,22 +1,27 @@
   METHOD if_badi_cte_fin_post_use_cases~determine_use_case.
+    DATA: ls_cc_01 TYPE zhr_sst_cc_01.
+
     FIELD-SYMBOLS:
       <ls_add_data> LIKE LINE OF is_entry_data-additional_data.
 
     CLEAR: ev_customer_use_case_id, ev_customer_tax_case_id.
 
-    " Ermittle alle Kosten, die eine Sonderbehandlung brauchen
+    " Read Paymenttype
     READ TABLE is_entry_data-additional_data
     WITH KEY name = 'REPORT_ENTRY_PAT_KEY'
     ASSIGNING <ls_add_data>.
 
     IF sy-subrc = 0.
-*    IF <ls_add_data>-value = 'CBCP'.
-*
-      SELECT COUNT(*) FROM zhr_sst_cc_01
+      CLEAR ls_cc_01.
+      SELECT * FROM zhr_sst_cc_01 INTO ls_cc_01
         WHERE payment_type = <ls_add_data>-value.
-*Fall Tabelleneintrag gefunden, ausschließen
-      IF sy-subrc IS INITIAL.
-        ev_customer_use_case_id = 'ZHR_SST_EXCL_CC'.
-      ENDIF.
+
+*Exclude in case of table entry found
+        IF ls_cc_01-bukrs IS INITIAL OR ls_cc_01-bukrs = is_document_data-company_code_employee.
+          ev_customer_use_case_id = 'ZN_EXCL_CC'.
+          ev_customer_tax_case_id = 'ZT_EXCL_CC'.
+          EXIT.
+        ENDIF.
+      ENDSELECT.
     ENDIF.
   ENDMETHOD.
