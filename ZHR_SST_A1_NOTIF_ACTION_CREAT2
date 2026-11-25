@@ -558,6 +558,10 @@ FUNCTION zhr_sst_a1_notif_action_creat2.
   IF lv_de = abap_false.
     CLEAR: ls_log.
 * Personal number
+    IF ls_request-pernr IS INITIAL.
+      RETURN.
+    ENDIF.
+
     ls_log-pernr = ls_request-pernr.
 
     CONCATENATE ls_request-doc_id ls_request-segment_id INTO lv_trip_id.
@@ -626,7 +630,6 @@ FUNCTION zhr_sst_a1_notif_action_creat2.
     ls_log-ort = ls_request-ort_bs.
 
     MODIFY zhrsst_a1_2 FROM ls_log.
-    COMMIT WORK AND WAIT.
     IF sy-subrc <> 0.
       MESSAGE ID 'ZHR_SST_CONCUR_MC' TYPE 'I' NUMBER 005 INTO lv_message.
       CALL FUNCTION 'BALW_BAPIRETURN_GET1'
@@ -654,6 +657,7 @@ FUNCTION zhr_sst_a1_notif_action_creat2.
       ENDIF.
     ENDIF.
 
+    COMMIT WORK AND WAIT.
     RETURN.
   ENDIF.
 
