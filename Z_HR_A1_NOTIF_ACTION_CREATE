@@ -88,6 +88,7 @@ FUNCTION zhr_sst_a1_notif_action_create.
   DATA ls_addr1_sel TYPE addr1_sel.
   DATA ls_address_data TYPE addr1_val.
   DATA lv_sender_mail TYPE adr6-smtp_addr.
+  DATA ls_custom_value TYPE /nyx/sccoreq08v4.
 
   FIELD-SYMBOLS <msg> TYPE bapiret2.
   FIELD-SYMBOLS: <dest> TYPE /nyx/a1_dest_s.
@@ -463,6 +464,25 @@ FUNCTION zhr_sst_a1_notif_action_create.
   ENDSELECT.
 
 ********************************************************************************
+* Get the RBA email from Concur
+********************************************************************************
+  CLEAR: ls_custom_value.
+  SELECT SINGLE * FROM /nyx/sccoreq08v4 INTO ls_custom_value
+    WHERE
+       doc_id = ls_request-doc_id AND
+       time_stamp = lv_timestamp AND
+       customfieldname = 'CUSTOM5'.
+
+  IF sy-subrc = 0.
+    ls_request-assi_email = ls_custom_value-value.
+    CLEAR: ls_kv.
+    ls_kv-skey = '@MAIL_CC@'.
+    ls_kv-svalue = ls_request-assi_email.
+    APPEND ls_kv TO lt_key_value_param.
+  ENDIF.
+
+
+********************************************************************************
 *Perform mandatory checks for A1 creation: Check Country's validity for A1
 ********************************************************************************
 
@@ -601,6 +621,10 @@ FUNCTION zhr_sst_a1_notif_action_create.
           ls_dest-hausnr_bs = ls_request-hausnr_bs.
           ls_dest-name_bs = ls_request-name_bs.
           APPEND ls_dest TO ls_clusterdata-dest.
+
+          IF ls_clusterdata-hdr-assistant_email <> ls_request-assi_email.
+            ls_clusterdata-hdr-assistant_email = ls_request-assi_email.
+          ENDIF.
 
           ls_clusterdata-hdr-user_action = /nyx/cl_a1_util=>gc_action_submit.
 * Update the A1
