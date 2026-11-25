@@ -1,6 +1,6 @@
 FUNCTION zhr_sst_a1_notif_action_creat2.
 *"----------------------------------------------------------------------
-*"*"Local Interface:
+*"*"Lokale Schnittstelle:
 *"  IMPORTING
 *"     VALUE(IV_VALUE01) TYPE  /NYX/A1_TEXT255 OPTIONAL
 *"     VALUE(IV_VALUE02) TYPE  /NYX/A1_TEXT255 OPTIONAL
@@ -79,8 +79,8 @@ FUNCTION zhr_sst_a1_notif_action_creat2.
   DATA lt_hdr TYPE /nyx/a1_hdr_tt.
   DATA ls_clusterdata TYPE /nyx/a1_data_s.
   DATA lv_text TYPE string.
-  DATA: lv_bsnr TYPE /nyx/a1_anr.
-  DATA: ls_dest TYPE /nyx/a1_dest_s.
+  DATA lv_bsnr TYPE /nyx/a1_anr.
+  DATA ls_dest TYPE /nyx/a1_dest_s.
   DATA lt_p0001 TYPE TABLE OF p0001.
   DATA ls_p0001 TYPE p0001.
   DATA ls_t001 TYPE t001.
@@ -96,6 +96,10 @@ FUNCTION zhr_sst_a1_notif_action_creat2.
   DATA lv_uname TYPE uname.
   DATA lv_message TYPE bapi_msg.
   DATA lv_trip_id TYPE /nyx/sc_co_req_legid_v04.
+  DATA ls_custom_value TYPE /nyx/sccoreq08v4.
+  DATA lv_rba_email_address TYPE comm_id_long.
+  DATA ls_pa0105 TYPE pa0105.
+  DATA lv_rba_pernr TYPE pernr_d.
 
   FIELD-SYMBOLS <msg> TYPE bapiret2.
   FIELD-SYMBOLS: <dest> TYPE /nyx/a1_dest_s.
@@ -472,6 +476,27 @@ FUNCTION zhr_sst_a1_notif_action_creat2.
   ENDSELECT.
 
 ********************************************************************************
+* Get the RBA email from Concur
+********************************************************************************
+  CLEAR: ls_custom_value, lv_rba_email_address, lv_rba_pernr.
+  SELECT SINGLE * FROM /nyx/sccoreq08v4 INTO ls_custom_value
+    WHERE
+       doc_id = ls_request-doc_id AND
+       time_stamp = lv_timestamp AND
+       customfieldname = 'CUSTOM5'.
+
+  IF sy-subrc = 0.
+    lv_rba_email_address = ls_custom_value-value.
+    ls_request-assi_email = lv_rba_email_address.
+    CLEAR: ls_kv.
+    ls_kv-skey = '@MAIL_CC@'.
+    ls_kv-svalue = ls_request-assi_email.
+    APPEND ls_kv TO lt_key_value_param.
+  ENDIF.
+
+
+
+********************************************************************************
 *Perform mandatory checks for A1 creation: Check Country's validity for A1
 ********************************************************************************
 
@@ -545,27 +570,50 @@ FUNCTION zhr_sst_a1_notif_action_creat2.
 
     ls_log-fdf_kostl_pernr = ls_pa0001-kostl.
 
-* Find the approver for traveller
-    SELECT SINGLE * FROM fpb_persparm INTO ls_persparm "#EC CI_ALL_FIELDS_NEEDED
-      WHERE
-        low = ls_log-pernr AND                            "#EC CI_SUBRC
-        applid = 'CO-CCA-TR' AND
-    fieldname = 'PERNR'.                           "#EC "#EC CI_NOFIRST
-
-    IF sy-subrc = 0.
-*   Get Pernr from User
-      lv_uname = ls_persparm-perskey.
-      CALL FUNCTION 'BAPI_USR01DOHR_GETEMPLOYEE'
-        EXPORTING
-          id             = lv_uname
-        IMPORTING
-*         return         = ls_return
-          employeenumber = lv_pernr.
+* Find the RBA for traveller
+* Read RBA pernr from pa0105
+    CLEAR: lv_rba_pernr.
+    IF lv_rba_email_address IS NOT INITIAL.
+      CLEAR: ls_pa0105.
+      SELECT SINGLE * FROM pa0105 INTO ls_pa0105
+        WHERE
+          subty = '0010' AND
+          begda <= sy-datum AND
+          endda >= sy-datum AND
+          usrid_long = lv_rba_email_address.
 
       IF sy-subrc = 0.
-        ls_log-pernr_rba = lv_pernr.
+        lv_rba_pernr = ls_pa0105-pernr.
       ENDIF.
     ENDIF.
+
+    IF lv_rba_pernr IS NOT INITIAL.
+* Input from Concur available
+      ls_log-pernr_rba = lv_rba_pernr.
+    ELSE.
+* Fetch from SAP system
+      SELECT SINGLE * FROM fpb_persparm INTO ls_persparm "#EC CI_ALL_FIELDS_NEEDED
+        WHERE
+          low = ls_log-pernr AND                          "#EC CI_SUBRC
+          applid = 'CO-CCA-TR' AND
+      fieldname = 'PERNR'.                         "#EC "#EC CI_NOFIRST
+
+      IF sy-subrc = 0.
+*   Get Pernr from User
+        lv_uname = ls_persparm-perskey.
+        CALL FUNCTION 'BAPI_USR01DOHR_GETEMPLOYEE'
+          EXPORTING
+            id             = lv_uname
+          IMPORTING
+*           return         = ls_return
+            employeenumber = lv_pernr.
+
+        IF sy-subrc = 0.
+          ls_log-pernr_rba = lv_pernr.
+        ENDIF.
+      ENDIF.
+    ENDIF.
+
 
     ls_log-datv1 = ls_request-startdate.
     ls_log-datb1 = ls_request-enddate.
