@@ -194,6 +194,11 @@ FUNCTION zhr_sst_a1_notif_action_creat2.
             SELECT SINGLE * FROM t001 INTO ls_t001 WHERE bukrs = ls_p0001-bukrs AND land1 = 'DE'.
             IF sy-subrc <> 0.
               lv_de = abap_false.
+
+*              set pernr in request = SAP Pernr
+              ls_request-pernr = ls_personee-employeeid.
+*              set pernr in key value table = SAP Pernr
+              ls_kv-svalue = ls_personee-employeeid.
             ELSE.
               lv_de = abap_true.
 *              set pernr in request = SAP Pernr
