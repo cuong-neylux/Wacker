@@ -176,6 +176,7 @@ FUNCTION zhr_sst_a1_notif_action_creat2.
           CLEAR: ls_personee.
           LOOP AT lt_personee INTO ls_personee.
 *           check if company code is in Germany
+            CLEAR: lt_p0001.
             CALL FUNCTION 'HR_READ_INFOTYPE_AUTHC_DISABLE'.
             CALL FUNCTION 'HR_READ_INFOTYPE'
               EXPORTING
@@ -559,21 +560,14 @@ FUNCTION zhr_sst_a1_notif_action_creat2.
 * Personal number
     ls_log-pernr = ls_request-pernr.
 
-* Create entry in logging table 02
-    SELECT SINGLE * FROM /nyx/sccoreq02v4 INTO ls_tr_header WHERE doc_id = ls_request-doc_id. "#EC CI_ALL_FIELDS_NEEDED
-    IF sy-subrc <> 0.
-
-    ENDIF.
-
-    CONCATENATE ls_tr_header-requestid ls_request-segment_id INTO lv_trip_id.
+    CONCATENATE ls_request-doc_id ls_request-segment_id INTO lv_trip_id.
     CONCATENATE lv_trip_id '1ST' INTO ls_log-trip_id.
     CONDENSE ls_log-trip_id.
 
     SELECT SINGLE * FROM pa0001 INTO ls_pa0001 WHERE pernr = ls_request-pernr AND begda <= sy-datum AND endda >= sy-datum.
-    IF sy-subrc <> 0.
+    IF sy-subrc = 0.
+      ls_log-fdf_kostl_pernr = ls_pa0001-kostl.
     ENDIF.
-
-    ls_log-fdf_kostl_pernr = ls_pa0001-kostl.
 
 * Find the RBA for traveller
 * Read RBA pernr from pa0105
