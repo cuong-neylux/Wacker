@@ -587,7 +587,7 @@ FORM process_data .
 
 * Get all the trips of travelers that do not belong to German company code
   CLEAR: lv_date, lv_time, lt_log.
-  SELECT * FROM zhrsst_a1_2 INTO TABLE lt_log WHERE a1mnr = '' AND vp_date = lv_date AND vp_time = lv_time AND vp_action  = ''.
+  SELECT * FROM zhrsst_a1_2 INTO TABLE lt_log WHERE a1mnr = '' AND vp_date = lv_date AND vp_time = lv_time AND vp_action  = '' AND vp_action = 'APPROVED'.
   MOVE-CORRESPONDING EXACT lt_log TO lt_aus_d.
 
   APPEND LINES OF lt_aus_d TO gt_aus_d.
