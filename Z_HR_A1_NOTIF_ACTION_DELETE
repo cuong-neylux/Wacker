@@ -72,11 +72,17 @@ FUNCTION zhr_sst_a1_notif_action_delete.
   DATA go_context TYPE REF TO /nyx/cl_a1_context.
   DATA gv_msg TYPE bapiret2.
   DATA gv_error TYPE char1.
+  DATA lt_actions TYPE /nyx/a1_sync_0700_act_tt.
+  DATA gt_result TYPE TABLE OF /nyx/a1_sync_0700_alv.
 
   DATA: BEGIN OF ls_key,
           employeenumber TYPE persno,
           a1mnr          TYPE /nyx/a1_mnr,
         END OF ls_key.
+
+  FIELD-SYMBOLS <msg> TYPE bapiret2.
+  FIELD-SYMBOLS <ls_result> TYPE /nyx/a1_sync_0700_alv.
+
 ********************************************************************************
 * Berechtigungsprüfung
 ********************************************************************************
@@ -234,4 +240,24 @@ FUNCTION zhr_sst_a1_notif_action_delete.
   IF gv_error IS NOT INITIAL.
 *   Suitable Error Message
   ENDIF.
+
+  TRY.
+      /nyx/cl_a1_mgr=>sync_0700_dxa1(
+        EXPORTING
+          iv_pernr  = ls_request-pernr
+          iv_begda  = ls_request-startdate
+          iv_endda  = ls_request-enddate
+          iv_update = 'X'
+          iv_userfc = ''
+        IMPORTING
+          et_actions = lt_actions ).
+      COMMIT WORK AND WAIT.
+    CATCH /nyx/cx_a1_exception. " A1: Exception Klasse
+*       Hmm... Eine Message ist im Context
+      LOOP AT go_context->get_msg( ) ASSIGNING <msg>.
+        APPEND INITIAL LINE TO gt_result ASSIGNING <ls_result>.
+        MOVE-CORRESPONDING <msg> TO <ls_result>.
+        <ls_result>-pernr = ls_request-pernr.
+      ENDLOOP.
+  ENDTRY.
 ENDFUNCTION.
