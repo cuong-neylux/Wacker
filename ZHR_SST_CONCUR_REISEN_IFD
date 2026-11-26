@@ -31,9 +31,6 @@ DATA: gt_log TYPE TABLE OF zhrsst_a1_2.
 DATA: gt_a1_2 TYPE TABLE OF zhrsst_a1_2.
 DATA: gt_dest TYPE SORTED TABLE OF /nyx/a1_dest WITH NON-UNIQUE KEY pernr a1mnr.
 DATA: gt_a1_hist_deleted TYPE TABLE OF /nyx/a1_hist.
-" >>> Begin of change – Cuong Luc (neylux GmbH) – 26.11.2026 – Deletion for non-DE employees
-  FIELD-SYMBOLS: <ls_aus_d_nde> TYPE zhr_sst_concur_reisen_output_s.
-" <<< End of change – Cuong Luc (neylux GmbH) – 26.11.2026 – Deletion for non-DE employees
 TYPES gty_data TYPE c LENGTH 4096.
 
 
