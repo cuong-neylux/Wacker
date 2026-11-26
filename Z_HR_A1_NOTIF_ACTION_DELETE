@@ -1,6 +1,6 @@
 FUNCTION zhr_sst_a1_notif_action_delete.
 *"----------------------------------------------------------------------
-*"*"Lokale Schnittstelle:
+*"*"Local Interface:
 *"  IMPORTING
 *"     VALUE(IV_VALUE01) TYPE  /NYX/A1_TEXT255 OPTIONAL
 *"     VALUE(IV_VALUE02) TYPE  /NYX/A1_TEXT255 OPTIONAL
@@ -74,12 +74,10 @@ FUNCTION zhr_sst_a1_notif_action_delete.
   DATA gv_error TYPE char1.
   DATA lt_actions TYPE /nyx/a1_sync_0700_act_tt.
   DATA gt_result TYPE TABLE OF /nyx/a1_sync_0700_alv.
-" >>> Begin of change – Cuong Luc (neylux GmbH) – 26.11.2026 – Deletion for non-DE employees
-  DATA ls_log         TYPE zhrsst_a1_2.
-  DATA lt_log         TYPE TABLE OF zhrsst_a1_2.
-  DATA lv_trip_id_log TYPE zhrsst_a1_2-trip_id.
-  DATA lv_pattern     TYPE string.
-" <<< End of change – Cuong Luc (neylux GmbH) – 26.11.2026 – Deletion for non-DE employees
+  DATA lv_de TYPE abap_bool.
+  DATA ls_log TYPE zhrsst_a1_2.
+  DATA lv_trip_id TYPE /nyx/sc_co_req_legid_v04.
+  DATA: lt_log TYPE TABLE OF zhrsst_a1_2.
   DATA: BEGIN OF ls_key,
           employeenumber TYPE persno,
           a1mnr          TYPE /nyx/a1_mnr,
@@ -173,8 +171,14 @@ FUNCTION zhr_sst_a1_notif_action_delete.
             READ TABLE lt_p0001 INTO ls_p0001 INDEX 1.
             SELECT SINGLE * FROM t001 INTO ls_t001 WHERE bukrs = ls_p0001-bukrs AND land1 = 'DE'.
             IF sy-subrc <> 0.
-              CONTINUE.
+              lv_de = abap_false.
+
+*              set pernr in request = SAP Pernr
+              ls_request-pernr = ls_personee-employeeid.
+*              set pernr in key value table = SAP Pernr
+              ls_kv-svalue = ls_personee-employeeid.
             ELSE.
+              lv_de = abap_true.
 *              set pernr in request = SAP Pernr
               ls_request-pernr = ls_personee-employeeid.
 *              set pernr in key value table = SAP Pernr
@@ -231,21 +235,14 @@ FUNCTION zhr_sst_a1_notif_action_delete.
 * Non-DE trips are not created in the A1 manager (see ZHR_SST_A1_NOTIF_ACTION_CREAT2),
 * they only exist in ZHRSST_A1_2. Mark them as deleted there, so that
 * ZHR_SST_CONCUR_REISEN_IFD sends the cancellation to Deloitte.
-  IF ls_request-pernr IS INITIAL.
+  IF lv_de = abap_false.
     CLEAR lt_log.
     IF ls_request-segment_id IS NOT INITIAL.
 *     Trip ID built the same way as in ZHR_SST_A1_NOTIF_ACTION_CREAT2
-      CONCATENATE ls_request-doc_id ls_request-segment_id '1ST' INTO lv_trip_id_log.
-      CONDENSE lv_trip_id_log.
+      CONCATENATE ls_request-doc_id ls_request-segment_id '1ST' INTO lv_trip_id.
+      CONDENSE lv_trip_id.
       SELECT * FROM zhrsst_a1_2 INTO TABLE lt_log
-        WHERE trip_id = lv_trip_id_log
-          AND a1mnr   = ''.
-    ELSEIF ls_request-doc_id IS NOT INITIAL.
-*     No segment given -> all segments of the Concur request
-      lv_pattern = |{ ls_request-doc_id }%|.
-      SELECT * FROM zhrsst_a1_2 INTO TABLE lt_log
-        WHERE trip_id LIKE lv_pattern
-          AND a1mnr   = ''.
+        WHERE trip_id = lv_trip_id.
     ENDIF.
 
 *   Trip never reported -> nothing to delete
@@ -281,6 +278,7 @@ FUNCTION zhr_sst_a1_notif_action_delete.
     RETURN.
   ENDIF.
 " <<< End of change – Cuong Luc (neylux GmbH) – 26.11.2026 – Deletion for non-DE employees
+
 
 ********************************************************************************
 * Do action
