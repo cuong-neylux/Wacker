@@ -242,7 +242,7 @@ FUNCTION zhr_sst_a1_notif_action_delete.
       CONCATENATE ls_request-doc_id ls_request-segment_id '1ST' INTO lv_trip_id.
       CONDENSE lv_trip_id.
       SELECT * FROM zhrsst_a1_2 INTO TABLE lt_log
-        WHERE trip_id = lv_trip_id.
+        WHERE trip_id = lv_trip_id AND a1mnr = ''.
     ENDIF.
 
 *   Trip never reported -> nothing to delete
