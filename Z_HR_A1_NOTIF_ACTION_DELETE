@@ -151,8 +151,9 @@ FUNCTION zhr_sst_a1_notif_action_delete.
 *           ET_EMPLOYEESINFO        =
 
         IF sy-subrc = 0.
-          CLEAR: ls_personee, lt_p0001.
+          CLEAR: ls_personee.
           LOOP AT lt_personee INTO ls_personee.
+            CLEAR lt_p0001.
 *           check if company code is in Germany
             CALL FUNCTION 'HR_READ_INFOTYPE_AUTHC_DISABLE'.
             CALL FUNCTION 'HR_READ_INFOTYPE'
@@ -230,51 +231,51 @@ FUNCTION zhr_sst_a1_notif_action_delete.
     APPEND ls_kv TO lt_key_value_param.
   ENDLOOP.
 
-  " >>> Begin of change – Cuong Luc (neylux GmbH) – 26.11.2026 – Deletion for non-DE employees
-* Employee is not in German company code
-* Non-DE trips are not created in the A1 manager (see ZHR_SST_A1_NOTIF_ACTION_CREAT2),
-* they only exist in ZHRSST_A1_2. Mark them as deleted there, so that
-* ZHR_SST_CONCUR_REISEN_IFD sends the cancellation to Deloitte.
-  IF lv_de = abap_false.
-    CLEAR lt_log.
-    CONCATENATE ls_request-doc_id ls_request-segment_id '1ST' INTO lv_trip_id.
-    CONDENSE lv_trip_id.
-    SELECT * FROM zhrsst_a1_2 INTO TABLE lt_log
-      WHERE trip_id = lv_trip_id AND a1mnr = ''.
-
-*   Trip never reported -> nothing to delete
-    LOOP AT lt_log INTO ls_log.
-      ls_log-tw_status = 'CANCEL'.
-      CLEAR: ls_log-vp_date, ls_log-vp_time, ls_log-vp_action.
-      MODIFY zhrsst_a1_2 FROM ls_log.
-      IF sy-subrc <> 0.
-        ROLLBACK WORK.
-        CALL FUNCTION 'BALW_BAPIRETURN_GET1'
-          EXPORTING
-            type       = 'E'
-            cl         = 'ZHR_SST_CONCUR_MC'
-            number     = '005'
-          IMPORTING
-            bapireturn = ls_bapiret1
-          EXCEPTIONS
-            OTHERS     = 1.
-        IF sy-subrc = 0.
-          CALL FUNCTION 'BALW_RET1_TO_RET2'
-            EXPORTING
-              return_in = ls_bapiret1
-            IMPORTING
-              return_ou = es_return.
-        ENDIF.
-        RETURN.
-      ENDIF.
-    ENDLOOP.
-
-    IF lt_log IS NOT INITIAL.
-      COMMIT WORK AND WAIT.
-    ENDIF.
-    RETURN.
-  ENDIF.
-  " <<< End of change – Cuong Luc (neylux GmbH) – 26.11.2026 – Deletion for non-DE employees
+*  " >>> Begin of change – Cuong Luc (neylux GmbH) – 26.11.2026 – Deletion for non-DE employees
+** Employee is not in German company code
+** Non-DE trips are not created in the A1 manager (see ZHR_SST_A1_NOTIF_ACTION_CREAT2),
+** they only exist in ZHRSST_A1_2. Mark them as deleted there, so that
+** ZHR_SST_CONCUR_REISEN_IFD sends the cancellation to Deloitte.
+*  IF lv_de = abap_false.
+*    CLEAR lt_log.
+*    CONCATENATE ls_request-doc_id ls_request-segment_id '1ST' INTO lv_trip_id.
+*    CONDENSE lv_trip_id.
+*    SELECT * FROM zhrsst_a1_2 INTO TABLE lt_log
+*      WHERE trip_id = lv_trip_id AND a1mnr = ''.
+*
+**   Trip never reported -> nothing to delete
+*    LOOP AT lt_log INTO ls_log.
+*      ls_log-tw_status = 'CANCEL'.
+*      CLEAR: ls_log-vp_date, ls_log-vp_time, ls_log-vp_action.
+*      MODIFY zhrsst_a1_2 FROM ls_log.
+*      IF sy-subrc <> 0.
+*        ROLLBACK WORK.
+*        CALL FUNCTION 'BALW_BAPIRETURN_GET1'
+*          EXPORTING
+*            type       = 'E'
+*            cl         = 'ZHR_SST_CONCUR_MC'
+*            number     = '005'
+*          IMPORTING
+*            bapireturn = ls_bapiret1
+*          EXCEPTIONS
+*            OTHERS     = 1.
+*        IF sy-subrc = 0.
+*          CALL FUNCTION 'BALW_RET1_TO_RET2'
+*            EXPORTING
+*              return_in = ls_bapiret1
+*            IMPORTING
+*              return_ou = es_return.
+*        ENDIF.
+*        RETURN.
+*      ENDIF.
+*    ENDLOOP.
+*
+*    IF lt_log IS NOT INITIAL.
+*      COMMIT WORK AND WAIT.
+*    ENDIF.
+*    RETURN.
+*  ENDIF.
+*  " <<< End of change – Cuong Luc (neylux GmbH) – 26.11.2026 – Deletion for non-DE employees
 
 
 ********************************************************************************
