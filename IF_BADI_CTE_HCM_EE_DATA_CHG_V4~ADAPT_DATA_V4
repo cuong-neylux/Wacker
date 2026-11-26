@@ -109,7 +109,7 @@
             CLEAR: ls_approver, ls_approver_reference, ls_ee_loginid.
 
             SELECT SINGLE * FROM cte_d_ee_loginid INTO CORRESPONDING FIELDS OF ls_ee_loginid
-              WHERE system_key = '1' AND objid = ls_hrpersonee-employeeid.
+              WHERE system_key = '1' AND objid = ls_hrpersonee-personid.
 
 *           Add central pernr to BI Manager
             IF sy-subrc = 0.
