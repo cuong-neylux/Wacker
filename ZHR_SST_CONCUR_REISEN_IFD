@@ -593,26 +593,18 @@ FORM process_data .
   SELECT * FROM zhrsst_a1_2 INTO TABLE lt_log WHERE a1mnr = '' AND vp_date = lv_date AND vp_time = lv_time AND vp_action  = ''.
   MOVE-CORRESPONDING EXACT lt_log TO lt_aus_d.
 
-" >>> Begin of change – Cuong Luc (neylux GmbH) – 26.11.2026 – Deletion for non-DE employees
-* Deleted non-DE trips are sent to Deloitte as CANCEL (same as DE trips)
-  LOOP AT lt_aus_d ASSIGNING <ls_aus_d_nde> WHERE tw_status = 'DELETED'.
-    <ls_aus_d_nde>-tw_status = 'CANCEL'.
-  ENDLOOP.
-" <<< End of change – Cuong Luc (neylux GmbH) – 26.11.2026 – Deletion for non-DE employees
-
   APPEND LINES OF lt_aus_d TO gt_aus_d.
 
 * Add vp details to log
   LOOP AT lt_log INTO ls_log.
     ls_log-vp_date = sy-datum.
     ls_log-vp_time = sy-uzeit.
-" >>> Begin of change – Cuong Luc (neylux GmbH) – 26.11.2026 – Deletion for non-DE employees
-    IF ls_log-tw_status = 'DELETED'.
+
+    IF ls_log-tw_status = 'CANCEL'.
       ls_log-vp_action = 'DELETE'.
     ELSE.
       ls_log-vp_action = 'CREATE'.
     ENDIF.
-" <<< End of change – Cuong Luc (neylux GmbH) – 26.11.2026 – Deletion for non-DE employees
 
     APPEND ls_log TO gt_log.
   ENDLOOP.
