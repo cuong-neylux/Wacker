@@ -250,7 +250,7 @@ FUNCTION zhr_sst_a1_notif_action_delete.
 
 *   Trip never reported -> nothing to delete
     LOOP AT lt_log INTO ls_log.
-      ls_log-tw_status = 'DELETED'.
+      ls_log-tw_status = 'CANCEL'.
       CLEAR: ls_log-vp_date, ls_log-vp_time, ls_log-vp_action.
       MODIFY zhrsst_a1_2 FROM ls_log.
       IF sy-subrc <> 0.
